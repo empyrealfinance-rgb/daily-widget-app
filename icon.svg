@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <!-- The app icon, "E · sunrise" (2026-10-18). tools/make_icons.py draws the PNGs from the same shapes. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#140e09"/><stop offset="1" stop-color="#3b240f"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFD98A"/>
+      <stop offset=".55" stop-color="#F6B44E" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#F6B44E" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" fill="url(#sky)"/>
+  <circle cx="60" cy="86" r="36" fill="url(#sun)"/>
+</svg>
