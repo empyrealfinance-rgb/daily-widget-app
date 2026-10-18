@@ -57,12 +57,12 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .card { background: var(--surface); border-radius: 14px; padding: 10px 14px 12px; margin-bottom: 12px; position: relative; }
 .ledger .scroller { position: relative; z-index: 1; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
 .ledger .scroller::-webkit-scrollbar { display: none; }
-.ledger.wide .scroller { margin-right: var(--margin); }
 .lrow { display: flex; align-items: center; gap: var(--wgap); width: max-content; padding: 3px 0; }
 .lrow.head { padding-bottom: 6px; }
 .lab {
-  position: sticky; left: 0; z-index: 1; width: var(--label); flex: none; align-self: stretch;
+  position: sticky; left: 0; z-index: 1; width: var(--label); flex: none; align-self: stretch; margin: -3px 0; padding-top: 3px; padding-bottom: 3px;
   display: flex; flex-direction: column; justify-content: center; background: var(--surface); padding-right: 6px; min-width: 0;
+  box-shadow: -2px 0 0 var(--surface), 2px 0 0 var(--surface);   /* hides the boxes passing under it at its edges */
 }
 .wk { display: flex; gap: var(--gap); }
 .title { font-size: 12px; color: var(--muted); }
@@ -75,8 +75,8 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .name i { width: 3px; height: 14px; border-radius: 2px; flex: none; }
 .name .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .name .hint { color: var(--muted); font-size: 11px; flex: none; }
-.why { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 
+.sq, .dh { opacity: var(--fade, 1); }   /* older days fade out (app.js fade()) */
 .dh {
   width: var(--cell); background: none; border: 0; padding: 0; position: relative;
   text-align: center; font-size: 11px; color: var(--faint); line-height: 1.15;
@@ -94,7 +94,7 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 .sq.s-done { background: var(--c); }
-.sq.s-flag { background: var(--c); opacity: .6; }
+.sq.s-flag { background: var(--c); opacity: calc(.6 * var(--fade, 1)); }
 .sq.s-todo { background: var(--todo); box-shadow: inset 0 0 0 1.5px #4d5159; }
 .sq.s-open { background: var(--open); }
 .sq.s-future { box-shadow: inset 0 0 0 1px #25272c; }
@@ -115,38 +115,24 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
   .name { font-size: 13.5px; }
 }
 
-/* ---- notes in the margin, tied to their box by a dotted thread */
-.margin { position: absolute; top: 0; right: 14px; width: calc(var(--margin) - 14px); height: 100%; }
-.mnote {
-  position: absolute; left: 0; right: 0; font-size: 12px; line-height: 1.35; color: var(--muted);
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-}
-.mnote .when { display: block; font-size: 11px; color: var(--faint); }
-svg.threads { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-svg.threads path { fill: none; stroke: #80838b; stroke-width: 2; stroke-dasharray: .5 6; stroke-linecap: round; opacity: .7; }
-
-/* ---- the popover (a note, a day, what a task is for) and the hover tip */
-#pop, #tip {
+/* ---- the popover (a box's note, a day's notes, a name, unticking an earlier day) */
+#pop {
   position: fixed; z-index: 20; background: var(--surface2); border: 1px solid #33363c; border-radius: 12px;
   opacity: 0; transform: translateY(-4px) scale(.98); transform-origin: top left;
   transition: opacity .14s ease, transform .14s ease;
 }
 #pop { padding: 10px 12px 12px; }
-#pop.show, #tip.show { opacity: 1; transform: none; }
-#pop[hidden], #tip[hidden] { display: none; }
+#pop.show { opacity: 1; transform: none; }
+#pop[hidden] { display: none; }
 #pop textarea { resize: none; overflow: hidden; min-height: 40px; margin-top: 6px; }
 .ph { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-.ph i, .ih i { width: 3px; height: 13px; border-radius: 2px; flex: none; }
+#pop input.nm { font-size: 16px; }
+.ph i { width: 3px; height: 13px; border-radius: 2px; flex: none; }
 .dn { display: flex; gap: 8px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .dn .t { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
 .dn .x { flex: 1; white-space: pre-wrap; }
 .dn .del { background: none; border: 0; color: var(--faint); padding: 0 2px; font-size: 13px; }
 .dn .del.armed { color: var(--danger); }
-#tip { pointer-events: none; max-width: 300px; padding: 9px 12px; font-size: 13px; }
-.ih { display: flex; align-items: center; gap: 6px; font-size: 14px; }
-p.why { white-space: normal; color: var(--muted); font-size: 13px; margin: 4px 0 0; }
-.goals { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
-.goals li { margin: 2px 0; }
 
 /* ---- shared bits */
 .row { display: flex; gap: 8px; align-items: center; }
@@ -154,6 +140,8 @@ p.why { white-space: normal; color: var(--muted); font-size: 13px; margin: 4px 0
 .btn { background: var(--surface2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; font-size: 15px; }
 .btn.small { padding: 6px 12px; font-size: 13px; }
 .btn.primary { background: var(--primary); border-color: var(--primary-line); color: #e3ece5; }
+.btn.danger { color: #e0a39b; border-color: #5a3a36; }
+.btn:focus-visible { outline: 1px solid #5a5e66; outline-offset: 1px; }
 .btn.wide { display: block; width: 100%; margin-top: 10px; }
 .btn.big { padding: 16px; font-size: 18px; }
 .back { background: none; border: 0; font-size: 26px; line-height: 1; padding: 4px 10px 4px 0; color: var(--muted); }

@@ -1,14 +1,15 @@
-// One page: tasks and supplements as ledgers, weeks Monday to Sunday. On wide screens notes sit in
-// the margin, tied to their box by a dotted thread.
-//   click a box                                   done / not done (gym: the gym panel; supplement: taken now)
+// One page: tasks and supplements as ledgers, weeks Monday to Sunday. A box with a note gets a small
+// dot in its corner; the note itself stays out of sight.
+//   click a box                                   done / not done (gym: the gym panel; supplement: taken now);
+//                                                 unticking an earlier day asks first
 //   right-click, Ctrl/Alt+click, long-press a box its note (Enter saves, Esc closes)
 //   click a date                                  that day's notes (how it went)
-//   click a name                                  what it's for, its goals, Archive (hover shows them too)
+//   click a name                                  rename it (Enter saves), Archive
 // Drawn from Store's data with Core's rules; every change goes through Store.change().
 
 (() => {
   const $ = sel => document.querySelector(sel);
-  const main = $('#main'), pop = $('#pop'), tip = $('#tip'), sheetEl = $('#sheet'), statusEl = $('#status');
+  const main = $('#main'), pop = $('#pop'), sheetEl = $('#sheet'), statusEl = $('#status');
 
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -25,7 +26,6 @@
   try { Object.assign(prefs, JSON.parse(localStorage.getItem('dw.prefs') || '{}')); } catch {}
   const savePrefs = () => { try { localStorage.setItem('dw.prefs', JSON.stringify(prefs)); } catch {} };
   const colorOf = item => (prefs.colors && item.color) || GREEN;
-  const canHover = matchMedia('(hover: hover)').matches;
   const listOf = (cfg, list) => (list === 'supps' ? cfg.supplements : cfg.tasks) || [];
 
   // ---- Drawing the page
@@ -43,12 +43,15 @@
       main.innerHTML = `<p class="muted center">${Store.status().state === 'error' ? esc(Store.status().error) : 'Loading…'}</p>`;
       return;
     }
-    const L = layout(), dates = Core.weeks(now, L.weeks), scroll = scrollState();
+    const active = list => (list || []).filter(t => Core.statusOn(t, now) === 'active');
+    const labels = active(cfg.tasks).map(t => [t.name, Core.hint(t, data, now)])
+      .concat(active(cfg.supplements).map(s => [s.name, s.dose || '']));
+    const L = shown = layout(labels), dates = Core.weeks(now, L.weeks), scroll = scrollState();
     const tasks = Core.rows(cfg, data, dates, now).filter(r => r.cells.some(c => c.state !== 'none' && c.state !== 'off'));
     const supps = Core.suppRows(cfg, data, dates, now);
     main.innerHTML = (tasks.length ? ledger('tasks', tasks, dates, L, data) : '') + (supps.length ? ledger('supps', supps, dates, L, data) : '');
     restoreScroll(scroll);
-    requestAnimationFrame(threads);
+    fade();
   }
 
   function renderStatus() {
@@ -69,20 +72,49 @@
       <button class="btn primary" data-act="settings">Open settings</button></div>`;
   }
 
-  // How many weeks fit: wide screens show several (with the notes margin), a phone shows one and
-  // swipes back to the earlier ones.
+  // The name column is as wide as the longest name (with its hint), so short names (an emoji) leave
+  // room for the boxes. Wide screens show as many weeks as fit, a phone shows one and swipes back.
   const GAP = 4, WEEK_GAP = 10;
-  function layout() {
+  const ruler = document.createElement('canvas').getContext('2d');
+  function textWidth(text, px) {
+    ruler.font = `${px}px ${getComputedStyle(document.body).fontFamily}`;
+    return ruler.measureText(text).width;
+  }
+  function layout(labels) {
     const narrow = innerWidth < 500;
     const inner = Math.min(main.clientWidth || innerWidth, 1200) - (narrow ? 16 + 20 : 24 + 28);   // main and card padding
-    const label = inner < 420 ? 130 : 168;
-    const margin = inner >= 900 ? 250 : 0;
-    const avail = inner - label - WEEK_GAP - margin;
+    let label = textWidth('supplements', 12);
+    for (const [name, hint] of labels) label = Math.max(label, textWidth(name, narrow ? 13.5 : 14) + (hint ? 6 + textWidth(hint, 11) : 0));
+    label = Math.min(Math.ceil(label) + (prefs.colors ? 9 : 0) + 14, narrow ? 150 : 240);
+    const avail = inner - label - WEEK_GAP;
     let cell = 24;
     const fit = Math.floor((avail + WEEK_GAP) / (7 * cell + 6 * GAP + WEEK_GAP));
-    if (fit < 2) cell = Math.max(20, Math.min(34, Math.floor((avail - 6 * GAP) / 7)));
-    return { label, margin, cell, weeks: fit >= 2 ? Math.min(fit, 8) : 6 };
+    if (fit < 2) {
+      cell = Math.max(20, Math.min(34, Math.floor((avail - 6 * GAP) / 7)));
+      label = Math.max(label, inner - WEEK_GAP - 7 * cell - 6 * GAP);   // what's left over goes to the names: no sliver of last week
+    }
+    // how many of the oldest days in view fade out: 4 on a phone, a week when two fit, two weeks when more do
+    const fadeDays = fit < 2 ? 4 : fit < 3 ? 7 : 14;
+    return { label, cell, weeks: fit >= 2 ? Math.min(fit, 8) : 6, fadeDays };
   }
+
+  // Older days fade out toward the left edge of what's in view, the oldest faintest; it follows a
+  // swipe back. Today and days to come never fade.
+  let shown = null, fading = false;
+  function fade() {
+    fading = false;
+    if (!shown) return;
+    const now = Core.today(), L = shown;
+    const span = L.fadeDays * (L.cell + GAP) + (L.fadeDays > 7 ? WEEK_GAP : 0);
+    main.querySelectorAll('.ledger').forEach(card => {
+      const x0 = card.querySelector('.scroller').getBoundingClientRect().left + L.label + WEEK_GAP;
+      card.querySelectorAll('.sq[data-date], .dh').forEach(el => {
+        const t = (el.getBoundingClientRect().left - x0) / span;
+        el.style.setProperty('--fade', (el.dataset.date || el.dataset.day) >= now || t >= 1 ? 1 : Math.max(0.2, 0.2 + 0.8 * t).toFixed(2));
+      });
+    });
+  }
+  main.addEventListener('scroll', () => { if (!fading) { fading = true; requestAnimationFrame(fade); } }, true);
 
   // Keep where each ledger was scrolled to; a ledger at its right end stays there (on this week).
   function scrollState() {
@@ -112,76 +144,51 @@
       const c = colorOf(r);
       return `<div class="lrow"><div class="lab"><button class="name" data-info="${r.id}" data-list="${list}">` +
         (prefs.colors && r.color ? `<i style="background:${c}"></i>` : '') +
-        `<span class="n">${esc(r.name)}</span>${r.hint ? `<span class="hint">${esc(r.hint)}</span>` : ''}</button>` +
-        (r.why ? `<span class="why">${esc(r.why)}</span>` : '') + '</div>' +
+        `<span class="n">${esc(r.name)}</span>${r.hint ? `<span class="hint">${esc(r.hint)}</span>` : ''}</button></div>` +
         weeks.map((w, wi) => `<div class="wk">${w.map((d, di) => box(r, r.cells[wi * 7 + di], list, c)).join('')}</div>`).join('') +
         '</div>';
     }).join('');
-    const notes = L.margin ? marginNotes(rows) : '';
-    return `<section class="card ledger${L.margin ? ' wide' : ''}" data-list="${list}" ` +
-      `style="--cell:${L.cell}px;--label:${L.label}px;--gap:${GAP}px;--wgap:${WEEK_GAP}px;--margin:${L.margin}px">` +
-      `<svg class="threads"></svg><div class="scroller">${head}${body}</div>${notes}</section>`;
+    return `<section class="card ledger" data-list="${list}" ` +
+      `style="--cell:${L.cell}px;--label:${L.label}px;--gap:${GAP}px;--wgap:${WEEK_GAP}px">` +
+      `<div class="scroller">${head}${body}</div></section>`;
   }
 
   function box(r, c, list, color) {
     if (c.state === 'none' || c.state === 'off') return '<span class="sq"></span>';
     return `<button class="sq s-${c.state}${c.note ? ' noted' : ''}" style="--c:${color}" data-id="${r.id}" data-list="${list}" ` +
-      `data-date="${c.date}"${c.note ? ` title="${esc(c.note)}"` : ''}></button>`;
-  }
-
-  function marginNotes(rows) {
-    const out = [];
-    for (const r of rows) for (const c of r.cells) {
-      if (c.note) out.push(`<div class="mnote" data-id="${r.id}" data-date="${c.date}"><span class="when">${esc(r.name)} · ${pretty(c.date)}</span>${esc(c.note)}</div>`);
-    }
-    return out.length ? `<div class="margin">${out.join('')}</div>` : '';
-  }
-
-  // The dotted threads from each noted box to its note in the margin. Notes sit level with their
-  // box, pushed down when they'd overlap.
-  function threads() {
-    main.querySelectorAll('.ledger.wide').forEach(card => {
-      const svg = card.querySelector('svg.threads'), margin = card.querySelector('.margin');
-      card.style.minHeight = '';
-      svg.innerHTML = '';
-      if (!margin) return;
-      const box = card.getBoundingClientRect(), mx = margin.getBoundingClientRect().left - box.left;
-      let bottom = 0, d = '';
-      margin.querySelectorAll('.mnote').forEach(n => {
-        const cell = card.querySelector(`.sq[data-id="${n.dataset.id}"][data-date="${n.dataset.date}"]`);
-        if (!cell) { n.style.display = 'none'; return; }
-        const r = cell.getBoundingClientRect(), cy = r.top + r.height / 2 - box.top;
-        const top = Math.max(cy - 8, bottom + 8, 4);
-        n.style.top = top + 'px';
-        bottom = top + n.offsetHeight;
-        const x1 = r.right - box.left + 2, x2 = mx - 6, y2 = top + 8;
-        d += `M${x1} ${cy}C${x1 + 50} ${cy} ${x2 - 50} ${y2} ${x2} ${y2}`;
-      });
-      if (bottom + 12 > box.height) card.style.minHeight = bottom + 12 + 'px';
-      svg.innerHTML = d ? `<path d="${d}"/>` : '';
-    });
+      `data-date="${c.date}"></button>`;
   }
 
   // ---- Taps
 
   function tap(el) {
-    const { id, list, date } = el.dataset, cfg = Store.config(), data = Store.data();
-    if (date > Core.today()) return;
-    if (list === 'supps') {
-      const s = Core.find(cfg.supplements, id), e = Core.suppOf(s, data, date);
-      return Store.change({ type: 'supp', date, id, on: !(e && e.taken), t: date === Core.today() ? Core.hhmm() : '', dose: s.dose || '' });
-    }
-    const t = Core.find(cfg.tasks, id);
-    if (t.kind === 'gym') return openGym(date);
-    Store.change({ type: 'task', date, id, done: !Core.isDone(t, data, date) });
+    const { id, list, date } = el.dataset, cfg = Store.config(), data = Store.data(), now = Core.today();
+    if (date > now) return;
+    const s = list === 'supps' ? Core.find(cfg.supplements, id) : null, t = s ? null : Core.find(cfg.tasks, id);
+    if (t && t.kind === 'gym') return openGym(date);
+    const on = s ? !(Core.suppOf(s, data, date) || {}).taken : !Core.isDone(t, data, date);
+    const write = () => Store.change(s ? { type: 'supp', date, id, on, t: date === now ? Core.hhmm() : '', dose: s.dose || '' }
+      : { type: 'task', date, id, done: on });
+    if (!on && date < now) return untickPop(el, s || t, date, write);
+    write();
   }
 
-  // ---- The little popover: a box's note, a day's notes, what a task is for
+  // Unticking an earlier day asks first: Enter (or Untick) unticks, Esc or a click elsewhere keeps it.
+  function untickPop(el, item, date, untick) {
+    openPop(el, `<div class="ph"><i style="background:${colorOf(item)}"></i>${esc(item.name)} · ${pretty(date)}</div>` +
+      '<div class="row end"><button class="btn small" data-pop="keep">Keep</button>' +
+      '<button class="btn small danger" data-pop="untick">Untick</button></div>', {
+      keep: () => closePop(false),
+      untick: () => { closePop(false); untick(); },
+    });
+    pop.querySelector('[data-pop="untick"]').focus();
+  }
+
+  // ---- The little popover: a box's note, a day's notes, a name
 
   let popActs = null, swallowClick = false;
 
   function openPop(anchor, html, acts) {
-    hideTip();
     popActs = acts || {};
     pop.innerHTML = html;
     pop.hidden = false;
@@ -195,8 +202,8 @@
       pop.style.cssText = `width:${w}px;left:${Math.max(12, Math.min(r.left - 10, innerWidth - w - 12))}px;top:${top}px`;
     }
     requestAnimationFrame(() => pop.classList.add('show'));
-    const ta = pop.querySelector('textarea');
-    if (ta) { grow(ta); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    const ta = pop.querySelector('textarea, input');
+    if (ta) { if (ta.tagName === 'TEXTAREA') grow(ta); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   }
 
   function closePop(save) {
@@ -244,18 +251,18 @@
     });
   }
 
-  function infoHtml(item, list) {
-    return `<div class="ih"><i style="background:${colorOf(item)}"></i>${esc(item.name)}` +
-      `${list === 'supps' && item.dose ? ` <span class="muted">${esc(item.dose)}</span>` : ''}</div>` +
-      (item.why ? `<p class="why">${esc(item.why)}</p>` : '') +
-      ((item.goals || []).length ? `<ul class="goals">${item.goals.map(g => `<li>${esc(g)}</li>`).join('')}</ul>` : '');
-  }
-
-  function infoPop(el) {
+  // A name: edit it in place (Enter saves; emoji welcome), or archive the row.
+  function namePop(el) {
     const { info: id, list } = el.dataset, item = Core.find(listOf(Store.config(), list), id);
-    openPop(el, infoHtml(item, list) + '<div class="row end"><button class="btn small" data-pop="archive">Archive</button></div>', {
+    const which = list === 'supps' ? 'supplements' : 'tasks';
+    openPop(el, `<input class="nm" value="${esc(item.name)}" aria-label="Name" autocomplete="off" autocapitalize="off">` +
+      '<div class="row end"><button class="btn small" data-pop="archive">Archive</button></div>', {
+      save: () => {
+        const name = pop.querySelector('input').value.trim();
+        if (name && name !== item.name) Store.change({ type: 'rename', list: which, id, name });
+      },
       archive: () => {
-        Store.change({ type: 'status', list: list === 'supps' ? 'supplements' : 'tasks', id, date: Core.today(), status: 'archived' });
+        Store.change({ type: 'status', list: which, id, date: Core.today(), status: 'archived' });
         closePop(false);
       },
     });
@@ -268,36 +275,12 @@
   pop.addEventListener('input', ev => { if (ev.target.tagName === 'TEXTAREA') grow(ev.target); });
   pop.addEventListener('keydown', ev => {
     if (ev.key === 'Escape') { ev.preventDefault(); closePop(false); }
-    else if (ev.key === 'Enter' && !ev.shiftKey && ev.target.tagName === 'TEXTAREA') { ev.preventDefault(); closePop(true); }
+    else if (ev.key === 'Enter' && !ev.shiftKey && /^(TEXTAREA|INPUT)$/.test(ev.target.tagName)) { ev.preventDefault(); closePop(true); }
   });
   // A click outside saves and closes it (and doesn't also tick a box)
   document.addEventListener('pointerdown', ev => {
     if (!pop.hidden && !pop.contains(ev.target)) { closePop(true); swallowClick = true; }
   }, true);
-
-  // Hovering a name shows what it's for (mouse only)
-  let tipTimer = null;
-  function showTip(el) {
-    const { info: id, list } = el.dataset, item = Core.find(listOf(Store.config(), list), id);
-    if (!item || (!item.why && !(item.goals || []).length)) return;
-    tip.innerHTML = infoHtml(item, list);
-    tip.hidden = false;
-    const r = el.getBoundingClientRect();
-    tip.style.left = Math.min(r.right + 12, innerWidth - 320) + 'px';
-    tip.style.top = r.top - 6 + 'px';
-    requestAnimationFrame(() => tip.classList.add('show'));
-  }
-  function hideTip() { clearTimeout(tipTimer); tip.classList.remove('show'); tip.hidden = true; }
-  if (canHover) {
-    main.addEventListener('pointerover', ev => {
-      const n = ev.target.closest('.name');
-      if (n && !n.contains(ev.relatedTarget) && pop.hidden) { clearTimeout(tipTimer); tipTimer = setTimeout(() => showTip(n), 250); }
-    });
-    main.addEventListener('pointerout', ev => {
-      const n = ev.target.closest('.name');
-      if (n && !n.contains(ev.relatedTarget)) hideTip();
-    });
-  }
 
   // ---- Clicks, right-clicks, long presses on the page
 
@@ -314,7 +297,7 @@
   main.addEventListener('pointercancel', cancelPress);
 
   function longPress(el) {
-    if (el.matches('.sq')) notePop(el); else if (el.matches('.dh')) dayPop(el); else infoPop(el);
+    if (el.matches('.sq')) notePop(el); else if (el.matches('.dh')) dayPop(el); else namePop(el);
   }
 
   main.addEventListener('contextmenu', ev => {
@@ -333,7 +316,7 @@
     const ds = el.dataset;
     if (ds.id && ds.date) return ev.ctrlKey || ev.altKey || ev.metaKey ? notePop(el) : tap(el);
     if (ds.day) return dayPop(el);
-    if (ds.info) return infoPop(el);
+    if (ds.info) return namePop(el);
     if (ds.act === 'settings') return openSettings();
   });
 

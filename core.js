@@ -90,17 +90,19 @@ var Core = (function () {
   //   open    possible that day, nothing to show (faint square, tappable)
   //   future  a day still to come
   //   none    not due that day (no square)
-  //   off     before the task existed, or paused / archived then
+  //   off     paused / archived then
+  // Days before it was tracked can still be ticked afterwards: they show as done or open, never missed.
   function cell(task, data, date, now, config) {
     now = now || today();
-    if (statusOn(task, date) !== 'active') return 'off';
+    var st = statusOn(task, date), before = st === null && date <= now;
+    if (st !== 'active' && !before) return 'off';
     var w = windowOf(task, date);
     if (!w) return 'none';
     var done = isDone(task, data, date);
     if (date > now) return done ? 'done' : 'future';
     if (task.kind === 'record') return !done ? 'open' : date < now && broken(task, data, date, config) ? 'flag' : 'done';
     if (done) return 'done';
-    if (task.kind === 'gym' || task.must === false) return date === now ? 'todo' : 'open';
+    if (before || task.kind === 'gym' || task.must === false) return date === now ? 'todo' : 'open';
     if (w[0] !== w[1]) {
       // A window of several days (24h fast, month end): done once anywhere in it is enough.
       if (doneBetween(task, data, w[0], w[1] < now ? w[1] : now)) return 'open';
@@ -131,7 +133,7 @@ var Core = (function () {
   }
 
   function rowOf(item, cells, extra) {
-    var r = { id: item.id, name: item.name, color: item.color || '', why: item.why || '', goals: item.goals || [], cells: cells };
+    var r = { id: item.id, name: item.name, color: item.color || '', cells: cells };
     for (var k in extra) if (extra.hasOwnProperty(k)) r[k] = extra[k];
     return r;
   }
@@ -152,7 +154,8 @@ var Core = (function () {
     return out;
   }
 
-  // Supplements: taken (with the time) or not; never "missed".
+  // Supplements: taken (with the time) or not; never "missed". Like tasks, days before one was
+  // tracked can be ticked afterwards.
   function suppOf(s, data, date) {
     var d = dayOf(data, date);
     return (d && d.supps && d.supps[s.id]) || null;
@@ -164,8 +167,8 @@ var Core = (function () {
       var s = list[i], cells = [];
       if (statusOn(s, now) !== 'active') continue;
       for (var j = 0; j < dates.length; j++) {
-        var e = suppOf(s, data, dates[j]), d = dates[j];
-        var st = statusOn(s, d) !== 'active' ? 'off' : e && e.taken ? 'done' : d > now ? 'future' : 'open';
+        var e = suppOf(s, data, dates[j]), d = dates[j], on = statusOn(s, d);
+        var st = on !== 'active' && !(on === null && d <= now) ? 'off' : e && e.taken ? 'done' : d > now ? 'future' : 'open';
         cells.push({ date: d, state: st, note: (e && e.note) || '', t: (e && e.t) || '' });
       }
       out.push(rowOf(s, cells, { kind: 'supplement', optional: false, hint: s.dose || '' }));
@@ -243,11 +246,21 @@ var Core = (function () {
     if (isEmpty(d)) delete m.days[date];
   }
 
-  // ---- Changes to config.json: { type: 'status', list: 'tasks'|'supplements', id, date, status }
+  // A ticked box on an earlier day: unticking it asks first (so a slip while ticking today's boxes
+  // doesn't wipe a past day).
+  function isSet(state) { return state === 'done' || state === 'flag'; }
+
+  // ---- Changes to config.json:
+  //   { type: 'status', list: 'tasks'|'supplements', id, date, status }   archive, restore
+  //   { type: 'rename', list, id, name }
+
+  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename'; }
 
   function applyConfig(c, op) {
     var item = find(c[op.list], op.id);
-    if (!item || op.type !== 'status') return c;
+    if (!item) return c;
+    if (op.type === 'rename') { if (op.name) item.name = op.name; return c; }
+    if (op.type !== 'status') return c;
     var h = item.status || (item.status = []);
     while (h.length && h[h.length - 1][0] >= op.date) h.pop();
     if (statusOn(item, op.date) !== op.status) h.push([op.date, op.status]);
@@ -291,7 +304,7 @@ var Core = (function () {
     WEEKDAYS: WEEKDAYS, pad: pad, ymd: ymd, parse: parse, addDays: addDays, diffDays: diffDays, today: today,
     hhmm: hhmm, weekday: weekday, monday: monday, monthOf: monthOf, weeks: weeks, statusOn: statusOn, find: find,
     dayOf: dayOf, entryOf: entryOf, isDone: isDone, windowOf: windowOf, cell: cell, weekCount: weekCount,
-    hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, apply: apply, applyConfig: applyConfig,
+    hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, isSet: isSet, apply: apply, isConfigOp: isConfigOp, applyConfig: applyConfig,
     serialize: serialize, serializeConfig: serializeConfig, toB64: toB64, fromB64: fromB64, newId: newId
   };
 })();

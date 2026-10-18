@@ -94,13 +94,13 @@ const Store = (() => {
 
   function message(ops) {
     const kinds = { task: 'tasks', note: 'notes', supp: 'supplements', suppNote: 'notes', dayNote: 'day notes', undayNote: 'day notes',
-      gymDay: 'gym', gymNote: 'gym', gymEx: 'gym', status: 'archive' };
+      gymDay: 'gym', gymNote: 'gym', gymEx: 'gym', status: 'archive', rename: 'names' };
     const what = [...new Set(ops.map(q => kinds[q.op.type] || q.op.type))].join(', ');
-    const dates = [...new Set(ops.map(q => q.op.date))].sort();
+    const dates = [...new Set(ops.map(q => q.op.date).filter(Boolean))].sort();
     return `${settings.device}: ${what} ${dates.join(', ')}`;
   }
 
-  // config.json takes status changes (archive, restore); the month files take everything else.
+  // config.json takes archive, restore and renames; the month files take everything else.
   const isConfig = path => path === 'config.json';
   const applyTo = (path, json, op) => (isConfig(path) ? Core.applyConfig(json, op) : Core.apply(json, op));
 
@@ -158,7 +158,7 @@ const Store = (() => {
   }
 
   function change(op) {
-    queue.push({ path: op.type === 'status' ? 'config.json' : `data/${Core.monthOf(op.date)}.json`, op });
+    queue.push({ path: Core.isConfigOp(op) ? 'config.json' : `data/${Core.monthOf(op.date)}.json`, op });
     write(KEY.queue, queue);
     notify('data');
     setStatus({ state: 'waiting' });
@@ -166,7 +166,7 @@ const Store = (() => {
     timer = setTimeout(() => flush(), 1500);
   }
 
-  // config.json, waiting changes (archive, restore) included
+  // config.json, waiting changes (archive, restore, names) included
   function config() {
     return views().config;
   }
