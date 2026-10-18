@@ -62,6 +62,8 @@ const Store = (() => {
   // Fetch whatever changed since last time: two listings, then only the files whose sha differs.
   async function pull() {
     const [root, data] = await Promise.all([call('GET', ''), call('GET', 'data')]);
+    // GitHub answers "not found" for a private repo the token can't see (not "forbidden")
+    if (!root) throw new Error(`This token can't see ${settings.repo}. On GitHub, give it access to that repo, with Contents: Read and write.`);
     const wanted = [...(root || []), ...(data || [])]
       .filter(f => f.path === 'config.json' || f.path === 'todo.json' || /^data\/\d{4}-\d{2}\.json$/.test(f.path))
       .filter(f => !files[f.path] || files[f.path].sha !== f.sha);
