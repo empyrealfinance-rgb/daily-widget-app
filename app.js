@@ -140,8 +140,8 @@
   }
 
   // A to-do's words sit just left of its box, cut with "…" when there's no room; with too little room on
-  // the left (an old one near the edge), on its right; one further on than the screen shows: at the right
-  // edge, with its day. Worked out again on every swipe, so they follow.
+  // the left (an old one near the edge), on its right. No box on screen (swiped past, or a plan further on),
+  // no words. Worked out again on every swipe, so they follow.
   function placeTodos() {
     const g = main.querySelector('.lrow.ghost');
     if (g) {
@@ -151,33 +151,27 @@
       g.querySelector('.tdin').style.cssText = w >= 60 ? `left:${s.left - 7 - w - r.left}px;width:${w}px` :
         `left:${s.right + 7 - r.left}px;width:${Math.max(60, v.right - 2 - s.right - 7)}px;text-align:left`;
     }
-    const rows = [...main.querySelectorAll('.lrow.todo:not(.ghost)')].map(row => {
-      const sq = row.querySelector('.sq.td'), tx = row.querySelector('.tdt'), sc = row.closest('.scroller');
-      return { tx, s: sq.getBoundingClientRect(), r: row.getBoundingClientRect(), v: sc.getBoundingClientRect() };
-    });
-    rows.forEach(({ tx, s, r, v }) => {
-      const gap = 7, px = innerWidth < 500 ? 13.5 : 14, lab = shown ? shown.label : 0;
-      const later = s.left > v.right - 6;                                 // further on than the screen shows
-      tx.classList.toggle('later', later);
-      const need = Math.ceil(textWidth(tx.firstChild.textContent + (later ? tx.lastChild.textContent : ''), px)) + 2;
-      if (later) {
-        const w = Math.max(0, Math.min(need, v.right - 2 - (v.left + lab + 6)));
-        tx.style.cssText = `left:${v.right - 2 - w - r.left}px;width:${w}px`;
-        return;
-      }
-      const under = s.left < v.left + lab - 2;                            // swiped back under the names
-      const left = s.left - gap - (v.left + 2), right = v.right - 2 - (s.right + gap);
-      if (!under && (left >= Math.min(need, 110) || left >= right)) {
-        const w = Math.min(need, left);
+    const lab = shown ? shown.label : 0, gap = 7, px = innerWidth < 500 ? 13.5 : 14;
+    const rows = [...main.querySelectorAll('.lrow.todo:not(.ghost)')].map(row => ({
+      r: row.getBoundingClientRect(), v: row.closest('.scroller').getBoundingClientRect(),
+      items: [...row.querySelectorAll('.tdt')].map(tx => ({ tx, s: row.querySelector(`.sq.td[data-todo="${tx.dataset.todo}"]`).getBoundingClientRect() })),
+    }));
+    rows.forEach(({ r, v, items }) => items.forEach(({ tx, s }, k) => {
+      if (s.left < v.left + lab - 2 || s.right > v.right + 1) { tx.style.cssText = 'display:none'; return; }
+      const need = Math.ceil(textWidth(tx.textContent, px)) + 2, prev = k ? items[k - 1].s.right + gap : -Infinity;
+      const left = s.left - gap - Math.max(v.left + 2, prev), right = v.right - 2 - (s.right + gap);
+      if (left >= Math.min(need, 110) || left >= right || items.length > 1) {
+        const w = Math.max(0, Math.min(need, left));
         tx.classList.remove('r');
         tx.style.cssText = `left:${s.left - gap - w - r.left}px;width:${w}px`;
       } else {
-        const x = under ? v.left + 2 : s.right + gap, w = Math.max(0, Math.min(need, v.right - 2 - x));
+        const w = Math.max(0, Math.min(need, right));
         tx.classList.add('r');
-        tx.style.cssText = `left:${x - r.left}px;width:${w}px`;
+        tx.style.cssText = `left:${s.right + gap - r.left}px;width:${w}px`;
       }
-    });
+    }));
   }
+
   // The ledgers move together: the one being swiped (or wheeled) leads, the others follow it.
   let driver = null;
   const lead = ev => { driver = ev.target.closest ? ev.target.closest('.scroller') : null; };
@@ -219,7 +213,7 @@
         const n = +d.slice(8), lbl = n === 1 ? MONTHS[+d.slice(5, 7) - 1] : n;
         return `<button class="dh${d === now ? ' today' : ''}${n === 1 ? ' m1' : ''}" data-day="${d}" title="${pretty(d)}"><span>${'MTWTFSS'[i]}</span>${lbl}</button>`;
       }).join('')}</div>`).join('') + '</div>';
-    const body = list === 'todo' ? todoRows(rows, weeks, dates) : rows.map(r => {
+    const body = list === 'todo' ? todoRows(rows, weeks, dates, L) : rows.map(r => {
       const c = colorOf(r);
       return `<div class="lrow"><div class="lab"><button class="name" data-info="${r.id}" data-list="${list}">` +
         (prefs.colors && r.color ? `<i style="background:${c}"></i>` : '') +
@@ -237,19 +231,34 @@
   }
 
   // To-dos: one box, on the day planned (older than the page: on its first day, the date in front); done:
-  // ticked, the words crossed out. Then the empty box: a new one, typed in place.
-  function todoRows(todos, weeks, dates) {
-    const first = dates[0], now = Core.today(), on = ghostOn && ghostOn >= now ? ghostOn : now;
+  // ticked, the words crossed out. One row each up to tomorrow; plans for later share rows where their words
+  // fit (a calendar's worth of them doesn't make a column of empty rows). Then the empty box: a new one.
+  function todoRows(todos, weeks, dates, L) {
+    const first = dates[0], now = Core.today(), tomorrow = Core.addDays(now, 1), px = innerWidth < 500 ? 13.5 : 14;
+    const on = ghostOn && ghostOn >= now ? ghostOn : now;
+    const xOf = d => { const i = Core.diffDays(first, d); return Math.floor(i / 7) * (7 * L.cell + 6 * GAP + WEEK_GAP) + (i % 7) * (L.cell + GAP); };
+    const words = t => (t.on < first ? `‹ ${pretty(t.on)} · ` : '') + t.text;
+    const lanes = [];
+    for (const t of todos) {
+      const col = t.on < first ? first : t.on, x = xOf(col), w = textWidth(words(t), px) + 7;
+      const it = { t, col, a: x - w, b: x < w ? x + L.cell + w : x + L.cell };        // no room on its left: words on its right
+      let lane = t.on > tomorrow ? lanes.find(l => l.end + 10 < it.a) : null;
+      if (!lane) lanes.push(lane = { items: [], end: -Infinity });
+      lane.items.push(it);
+      lane.end = Math.max(lane.end, it.b);
+    }
     const ghost = `<div class="lrow todo ghost"><div class="lab"></div>${weeks.map(w => `<div class="wk">${w.map(d => d === on ?
       `<button class="sq td s-new" data-newtodo="${d}" data-date="${d}" aria-label="New to-do"></button>` : '<span class="sq"></span>').join('')}</div>`).join('')}` +
       `<input class="tdt tdin" data-on="${on}" aria-label="New to-do" autocomplete="off" enterkeyhint="done"></div>`;
-    return todos.map(t => {
-      const col = t.on < first ? first : t.on;
-      const cells = weeks.map(w => `<div class="wk">${w.map(d => d === col ?
-        `<button class="sq td ${t.done ? 's-tdone' : 's-todo'}" data-todo="${t.id}" data-date="${d}" aria-label="${esc(t.text)}"></button>` :
-        '<span class="sq"></span>').join('')}</div>`).join('');
-      return `<div class="lrow todo"><div class="lab"></div>${cells}<button class="tdt${t.done ? ' done' : ''}" data-todo="${t.id}">` +
-        `<span class="w">${esc((t.on < first ? `‹ ${pretty(t.on)} · ` : '') + t.text)}</span><span class="when"> · ${pretty(t.on)} ›</span></button></div>`;
+    return lanes.map(l => {
+      const at = new Map(l.items.map(i => [i.col, i.t]));
+      const cells = weeks.map(w => `<div class="wk">${w.map(d => {
+        const t = at.get(d);
+        return t ? `<button class="sq td ${t.done ? 's-tdone' : 's-todo'}" data-todo="${t.id}" data-date="${d}" aria-label="${esc(t.text)}"></button>` :
+          '<span class="sq"></span>';
+      }).join('')}</div>`).join('');
+      return `<div class="lrow todo"><div class="lab"></div>${cells}` +
+        l.items.map(({ t }) => `<button class="tdt${t.done ? ' done' : ''}" data-todo="${t.id}">${esc(words(t))}</button>`).join('') + '</div>';
     }).join('') + ghost;
   }
 
