@@ -1,9 +1,14 @@
-// The screens: days (the grid), log (supplements, how you feel), gym (sets).
+// One page: tasks and supplements as ledgers, weeks Monday to Sunday. On wide screens notes sit in
+// the margin, tied to their box by a dotted thread.
+//   click a box                                   done / not done (gym: the gym panel; supplement: taken now)
+//   right-click, Ctrl/Alt+click, long-press a box its note (Enter saves, Esc closes)
+//   click a date                                  that day's notes (how it went)
+//   click a name                                  what it's for, its goals, Archive (hover shows them too)
 // Drawn from Store's data with Core's rules; every change goes through Store.change().
 
 (() => {
   const $ = sel => document.querySelector(sel);
-  const main = $('#main'), sheetEl = $('#sheet'), statusEl = $('#status');
+  const main = $('#main'), pop = $('#pop'), tip = $('#tip'), sheetEl = $('#sheet'), statusEl = $('#status');
 
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -14,30 +19,16 @@
     return n === 0 ? 'today' : n === 1 ? 'yesterday' : n < 7 ? `${n} days ago` : pretty(d);
   };
 
-  // ---- Sets: [kg, reps]; kg null = bodyweight, reps null = not written down
-  const kgText = k => (k == null ? 'BW' : String(k));
-  const parseKg = s => { s = String(s).trim().replace(',', '.'); const n = parseFloat(s); return s === '' || isNaN(n) ? null : n; };
-  // "45 × 10, 10, 8 · 47.5 × 8": consecutive sets with the same weight share it, like the Telegram notes
-  function fmtSets(sets) {
-    const groups = [];
-    for (const [k, r] of sets) {
-      const g = groups[groups.length - 1];
-      if (g && g.k === k) g.r.push(r ?? '?'); else groups.push({ k, r: [r ?? '?'] });
-    }
-    return groups.map(g => `${kgText(g.k)} × ${g.r.join(', ')}`).join(' · ');
-  }
+  // A color per task, or the classic green for all (settings)
+  const GREEN = '#4b8458';
+  const prefs = { colors: true };
+  try { Object.assign(prefs, JSON.parse(localStorage.getItem('dw.prefs') || '{}')); } catch {}
+  const savePrefs = () => { try { localStorage.setItem('dw.prefs', JSON.stringify(prefs)); } catch {} };
+  const colorOf = item => (prefs.colors && item.color) || GREEN;
+  const canHover = matchMedia('(hover: hover)').matches;
+  const listOf = (cfg, list) => (list === 'supps' ? cfg.supplements : cfg.tasks) || [];
 
-  // ---- What the screens remember: the tab survives a reload, the rest doesn't
-  const ui = { tab: 'days', logDate: Core.today(), gymDate: Core.today(), ex: null, picking: false, search: '', next: null, armed: -1, feel: '' };
-  try { ui.tab = localStorage.getItem('dw.tab') || 'days'; } catch {}
-
-  function go(tab) {
-    ui.tab = tab;
-    try { localStorage.setItem('dw.tab', tab); } catch {}
-    render();
-  }
-
-  // ---- Drawing
+  // ---- Drawing the page
 
   let deferred = false;
   const typing = () => { const a = document.activeElement; return !!a && /^(INPUT|TEXTAREA)$/.test(a.tagName); };
@@ -45,11 +36,19 @@
   function render() {
     deferred = false;
     $('#title').textContent = pretty(Core.today());
-    document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
-    if (!Store.ready()) main.innerHTML = setupView();
-    else if (!Store.config().tasks.length) main.innerHTML = `<p class="muted narrow">${Store.status().state === 'error' ? esc(Store.status().error) : 'Loading…'}</p>`;
-    else main.innerHTML = ui.tab === 'log' ? logView() : ui.tab === 'gym' ? gymView() : daysView();
     renderStatus();
+    if (!Store.ready()) { main.innerHTML = setupView(); return; }
+    const cfg = Store.config(), data = Store.data(), now = Core.today();
+    if (!(cfg.tasks || []).length && !(cfg.supplements || []).length) {
+      main.innerHTML = `<p class="muted center">${Store.status().state === 'error' ? esc(Store.status().error) : 'Loading…'}</p>`;
+      return;
+    }
+    const L = layout(), dates = Core.weeks(now, L.weeks), scroll = scrollState();
+    const tasks = Core.rows(cfg, data, dates, now).filter(r => r.cells.some(c => c.state !== 'none' && c.state !== 'off'));
+    const supps = Core.suppRows(cfg, data, dates, now);
+    main.innerHTML = (tasks.length ? ledger('tasks', tasks, dates, L, data) : '') + (supps.length ? ledger('supps', supps, dates, L, data) : '');
+    restoreScroll(scroll);
+    requestAnimationFrame(threads);
   }
 
   function renderStatus() {
@@ -70,139 +69,313 @@
       <button class="btn primary" data-act="settings">Open settings</button></div>`;
   }
 
-  // ---- Days: tasks as rows, days as columns, today on the right
-
-  const LABEL = 116, GAP = 4;
-  function fitDays() {
-    const w = Math.min(main.clientWidth || window.innerWidth, 1100) - 32;
-    const n = Math.max(7, Math.min(60, Math.floor((w - LABEL) / (34 + GAP))));
-    const cell = Math.max(24, Math.min(34, Math.floor((w - LABEL - n * GAP) / n)));
-    return { n, cell };
+  // How many weeks fit: wide screens show several (with the notes margin), a phone shows one and
+  // swipes back to the earlier ones.
+  const GAP = 4, WEEK_GAP = 10;
+  function layout() {
+    const narrow = innerWidth < 500;
+    const inner = Math.min(main.clientWidth || innerWidth, 1200) - (narrow ? 16 + 20 : 24 + 28);   // main and card padding
+    const label = inner < 420 ? 130 : 168;
+    const margin = inner >= 900 ? 250 : 0;
+    const avail = inner - label - WEEK_GAP - margin;
+    let cell = 24;
+    const fit = Math.floor((avail + WEEK_GAP) / (7 * cell + 6 * GAP + WEEK_GAP));
+    if (fit < 2) cell = Math.max(20, Math.min(34, Math.floor((avail - 6 * GAP) / 7)));
+    return { label, margin, cell, weeks: fit >= 2 ? Math.min(fit, 8) : 6 };
   }
 
-  function daysView() {
-    const cfg = Store.config(), data = Store.data(), now = Core.today();
-    const { n, cell } = fitDays();
-    const dates = Array.from({ length: n }, (_, i) => Core.addDays(now, i - n + 1));
-    const rows = Core.rows(cfg, data, dates, now).filter(r => r.cells.some(c => c.state !== 'none' && c.state !== 'off'));
-    const head = '<div></div>' + dates.map(d => {
-      const x = Core.parse(d);
-      return `<div class="dh${d === now ? ' today' : ''}"><span>${'SMTWTFS'[x.getDay()]}</span>${x.getDate()}</div>`;
+  // Keep where each ledger was scrolled to; a ledger at its right end stays there (on this week).
+  function scrollState() {
+    const s = {};
+    main.querySelectorAll('.ledger').forEach(c => {
+      const sc = c.querySelector('.scroller');
+      s[c.dataset.list] = { left: sc.scrollLeft, end: sc.scrollLeft + sc.clientWidth >= sc.scrollWidth - 4 };
+    });
+    return s;
+  }
+  function restoreScroll(s) {
+    main.querySelectorAll('.ledger').forEach(c => {
+      const sc = c.querySelector('.scroller'), k = s[c.dataset.list];
+      sc.scrollLeft = !k || k.end ? sc.scrollWidth : k.left;
+    });
+  }
+
+  function ledger(list, rows, dates, L, data) {
+    const now = Core.today(), weeks = [];
+    for (let i = 0; i < dates.length; i += 7) weeks.push(dates.slice(i, i + 7));
+    const head = `<div class="lrow head"><div class="lab">${list === 'supps' ? '<span class="title">supplements</span>' : ''}</div>` +
+      weeks.map(w => `<div class="wk">${w.map((d, i) => {
+        const noted = ((Core.dayOf(data, d) || {}).notes || []).length;
+        return `<button class="dh${d === now ? ' today' : ''}${noted ? ' noted' : ''}" data-day="${d}" title="${pretty(d)}"><span>${'MTWTFSS'[i]}</span>${+d.slice(8)}</button>`;
+      }).join('')}</div>`).join('') + '</div>';
+    const body = rows.map(r => {
+      const c = colorOf(r);
+      return `<div class="lrow"><div class="lab"><button class="name" data-info="${r.id}" data-list="${list}">` +
+        (prefs.colors && r.color ? `<i style="background:${c}"></i>` : '') +
+        `<span class="n">${esc(r.name)}</span>${r.hint ? `<span class="hint">${esc(r.hint)}</span>` : ''}</button>` +
+        (r.why ? `<span class="why">${esc(r.why)}</span>` : '') + '</div>' +
+        weeks.map((w, wi) => `<div class="wk">${w.map((d, di) => box(r, r.cells[wi * 7 + di], list, c)).join('')}</div>`).join('') +
+        '</div>';
     }).join('');
-    const row = r =>
-      `<div class="lab${r.optional ? ' opt' : ''}"><span class="name">${esc(r.name)}</span>${r.hint ? `<span class="hint">${esc(r.hint)}</span>` : ''}</div>` +
-      r.cells.map(c => cellHtml(r, c)).join('');
-    const must = rows.filter(r => !r.optional), opt = rows.filter(r => r.optional);
-    return `<div class="grid" style="--n:${n};--cell:${cell}px;--label:${LABEL}px">${head}${must.map(row).join('')}` +
-      (opt.length ? `<div class="sec">optional</div>${opt.map(row).join('')}` : '') + '</div>';
+    const notes = L.margin ? marginNotes(rows) : '';
+    return `<section class="card ledger${L.margin ? ' wide' : ''}" data-list="${list}" ` +
+      `style="--cell:${L.cell}px;--label:${L.label}px;--gap:${GAP}px;--wgap:${WEEK_GAP}px;--margin:${L.margin}px">` +
+      `<svg class="threads"></svg><div class="scroller">${head}${body}</div>${notes}</section>`;
   }
 
-  function cellHtml(r, c) {
-    if (c.state === 'none' || c.state === 'off') return `<span class="sq"></span>`;
-    const tip = `${r.name} · ${pretty(c.date)}${c.note ? '\n' + c.note : ''}`;
-    return `<button class="sq s-${c.state}${r.optional ? ' opt' : ''}${c.note ? ' noted' : ''}" data-task="${r.id}" data-date="${c.date}" title="${esc(tip)}"></button>`;
+  function box(r, c, list, color) {
+    if (c.state === 'none' || c.state === 'off') return '<span class="sq"></span>';
+    return `<button class="sq s-${c.state}${c.note ? ' noted' : ''}" style="--c:${color}" data-id="${r.id}" data-list="${list}" ` +
+      `data-date="${c.date}"${c.note ? ` title="${esc(c.note)}"` : ''}></button>`;
   }
 
-  function tapCell(id, date) {
-    const task = Store.config().tasks.find(t => t.id === id);
-    if (task.kind === 'gym') { ui.gymDate = date; ui.ex = null; ui.picking = false; return go('gym'); }
-    Store.change({ type: 'task', date, id, done: !Core.isDone(task, Store.data(), date) });
-  }
-
-  function recentNotes(id) {
-    const data = Store.data(), out = [];
-    for (const m of Object.keys(data).sort().reverse()) {
-      const days = data[m].days || {};
-      for (const d of Object.keys(days).sort().reverse()) {
-        const note = days[d].tasks && days[d].tasks[id] && days[d].tasks[id].note;
-        if (note && !out.includes(note)) out.push(note);
-        if (out.length >= 6) return out;
-      }
+  function marginNotes(rows) {
+    const out = [];
+    for (const r of rows) for (const c of r.cells) {
+      if (c.note) out.push(`<div class="mnote" data-id="${r.id}" data-date="${c.date}"><span class="when">${esc(r.name)} · ${pretty(c.date)}</span>${esc(c.note)}</div>`);
     }
-    return out;
+    return out.length ? `<div class="margin">${out.join('')}</div>` : '';
   }
 
-  function openNote(id, date) {
-    const task = Store.config().tasks.find(t => t.id === id);
-    const e = Core.entryOf(task, Store.data(), date);
-    const recent = recentNotes(id);
-    sheet(`<h3>${esc(task.name)} <span class="muted small">${pretty(date)}</span></h3>
-      <textarea id="note" rows="3" placeholder="what happened (used laptop 15 min, work only)">${esc(e && e.note)}</textarea>
-      ${recent.length ? `<div class="chips">${recent.map(n => `<button class="chip" data-act="chip">${esc(n)}</button>`).join('')}</div>` : ''}
-      <div class="row end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="save">Save</button></div>`, {
-      chip: el => { $('#note').value = el.textContent; },
-      save: () => { Store.change({ type: 'note', date, id, text: $('#note').value.trim() }); closeSheet(); },
+  // The dotted threads from each noted box to its note in the margin. Notes sit level with their
+  // box, pushed down when they'd overlap.
+  function threads() {
+    main.querySelectorAll('.ledger.wide').forEach(card => {
+      const svg = card.querySelector('svg.threads'), margin = card.querySelector('.margin');
+      card.style.minHeight = '';
+      svg.innerHTML = '';
+      if (!margin) return;
+      const box = card.getBoundingClientRect(), mx = margin.getBoundingClientRect().left - box.left;
+      let bottom = 0, d = '';
+      margin.querySelectorAll('.mnote').forEach(n => {
+        const cell = card.querySelector(`.sq[data-id="${n.dataset.id}"][data-date="${n.dataset.date}"]`);
+        if (!cell) { n.style.display = 'none'; return; }
+        const r = cell.getBoundingClientRect(), cy = r.top + r.height / 2 - box.top;
+        const top = Math.max(cy - 8, bottom + 8, 4);
+        n.style.top = top + 'px';
+        bottom = top + n.offsetHeight;
+        const x1 = r.right - box.left + 2, x2 = mx - 6, y2 = top + 8;
+        d += `M${x1} ${cy}C${x1 + 50} ${cy} ${x2 - 50} ${y2} ${x2} ${y2}`;
+      });
+      if (bottom + 12 > box.height) card.style.minHeight = bottom + 12 + 'px';
+      svg.innerHTML = d ? `<path d="${d}"/>` : '';
     });
   }
 
-  // ---- Log: supplements (one tap) and how you feel, each with the time
+  // ---- Taps
 
-  function logView() {
-    const cfg = Store.config(), d = ui.logDate;
-    const log = (Core.dayOf(Store.data(), d) || {}).log || [];
-    const sups = (cfg.supplements || []).filter(s => Core.statusOn(s, d) === 'active');
-    const supBtn = s => {
-      const taken = log.filter(e => e.kind === 'supplement' && e.item === s.id);
-      return `<button class="sup${taken.length ? ' taken' : ''}" data-sup="${s.id}"><span>${esc(s.name)}</span>
-        <small>${taken.length ? '✓ ' + taken.map(e => e.t).join(', ') : esc(s.dose)}</small></button>`;
-    };
-    return `<div class="narrow">${datebar(d)}
-      ${sups.length ? `<h4>Supplements</h4><div class="sups">${sups.map(supBtn).join('')}</div>` : ''}
-      <h4>How do you feel?</h4>
-      <textarea id="feel" rows="3" placeholder="energy, mood, body, sleep…">${esc(ui.feel)}</textarea>
-      <div class="row end"><button class="btn primary" data-act="feel">Save</button></div>
-      <div class="timeline">${log.map(e => `<button class="entry" data-entry="${e.id}"><span class="t">${e.t}</span><span class="x">${esc(entryText(e))}</span></button>`).join('')}</div>
-    </div>`;
-  }
-
-  function entryText(e) {
-    if (e.kind === 'supplement') {
-      const s = (Store.config().supplements || []).find(x => x.id === e.item);
-      return `${s ? s.name : e.item} ${e.dose || ''}`.trim();
+  function tap(el) {
+    const { id, list, date } = el.dataset, cfg = Store.config(), data = Store.data();
+    if (date > Core.today()) return;
+    if (list === 'supps') {
+      const s = Core.find(cfg.supplements, id), e = Core.suppOf(s, data, date);
+      return Store.change({ type: 'supp', date, id, on: !(e && e.taken), t: date === Core.today() ? Core.hhmm() : '', dose: s.dose || '' });
     }
-    return e.text || '';
+    const t = Core.find(cfg.tasks, id);
+    if (t.kind === 'gym') return openGym(date);
+    Store.change({ type: 'task', date, id, done: !Core.isDone(t, data, date) });
   }
 
-  function datebar(d) {
-    const now = Core.today();
-    return `<div class="datebar"><button data-nav="-1" aria-label="Day before">‹</button>
-      <span>${pretty(d)}${d === now ? ' · today' : ''}</span>
-      <button data-nav="1" aria-label="Day after"${d >= now ? ' disabled' : ''}>›</button></div>`;
+  // ---- The little popover: a box's note, a day's notes, what a task is for
+
+  let popActs = null, swallowClick = false;
+
+  function openPop(anchor, html, acts) {
+    hideTip();
+    popActs = acts || {};
+    pop.innerHTML = html;
+    pop.hidden = false;
+    pop.classList.remove('show');
+    if (innerWidth < 600) {
+      pop.style.cssText = `left:12px;right:12px;top:${$('header').getBoundingClientRect().bottom + 8}px`;
+    } else {
+      const r = anchor.getBoundingClientRect(), w = 320;
+      let top = r.bottom + 8;
+      if (top + pop.offsetHeight > innerHeight - 12) top = Math.max(12, r.top - 8 - pop.offsetHeight);
+      pop.style.cssText = `width:${w}px;left:${Math.max(12, Math.min(r.left - 10, innerWidth - w - 12))}px;top:${top}px`;
+    }
+    requestAnimationFrame(() => pop.classList.add('show'));
+    const ta = pop.querySelector('textarea');
+    if (ta) { grow(ta); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   }
 
-  function addSupplement(id, dose) {
-    const s = Store.config().supplements.find(x => x.id === id);
-    Store.change({ type: 'log', date: ui.logDate, entry: { id: Core.newId(), t: Core.hhmm(), kind: 'supplement', item: id, dose: dose || s.dose } });
+  function closePop(save) {
+    if (pop.hidden) return;
+    const acts = popActs;
+    popActs = null;
+    if (save && acts && acts.save) acts.save();
+    pop.hidden = true;
+    pop.classList.remove('show');
+    pop.innerHTML = '';
+    if (deferred) render();
   }
 
-  function supplementSheet(id) {
-    const s = Store.config().supplements.find(x => x.id === id);
-    sheet(`<h3>${esc(s.name)}</h3>
-      <label>Dose<input id="dose" value="${esc(s.dose)}"></label>
-      <div class="row end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="add">Add</button></div>`, {
-      add: () => { addSupplement(id, $('#dose').value.trim()); closeSheet(); },
-    });
-  }
+  const grow = ta => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 2 + 'px'; };
 
-  function entrySheet(entryId) {
-    const d = ui.logDate, e = ((Core.dayOf(Store.data(), d) || {}).log || []).find(x => x.id === entryId);
-    if (!e) return;
-    const isSup = e.kind === 'supplement';
-    sheet(`<h3>${isSup ? esc(entryText(e)) : 'How you felt'} <span class="muted small">${pretty(d)}</span></h3>
-      <label>Time<input id="t" type="time" value="${e.t}"></label>
-      ${isSup ? `<label>Dose<input id="val" value="${esc(e.dose)}"></label>` : `<label>Note<textarea id="val" rows="4">${esc(e.text)}</textarea></label>`}
-      <div class="row end"><button class="btn danger" data-act="del">Delete</button>${isSup ? '<button class="btn" data-act="again">Take again</button>' : ''}<button class="btn primary" data-act="save">Save</button></div>`, {
-      del: () => { Store.change({ type: 'unlog', date: d, id: e.id }); closeSheet(); },
-      again: () => { addSupplement(e.item, e.dose); closeSheet(); },
+  function notePop(el) {
+    const { id, list, date } = el.dataset, data = Store.data();
+    const item = Core.find(listOf(Store.config(), list), id);
+    const e = list === 'supps' ? Core.suppOf(item, data, date) : Core.entryOf(item, data, date);
+    const cur = (e && e.note) || '';
+    const taken = list === 'supps' && e && e.taken ? ` · ${[e.t, e.dose].filter(Boolean).join(' ')}` : '';
+    openPop(el, `<div class="ph"><i style="background:${colorOf(item)}"></i>${esc(item.name)} · ${pretty(date)}${esc(taken)}</div><textarea rows="1">${esc(cur)}</textarea>`, {
       save: () => {
-        const v = $('#val').value.trim();
-        Store.change({ type: 'log', date: d, entry: Object.assign({}, e, { t: $('#t').value || e.t }, isSup ? { dose: v } : { text: v }) });
-        closeSheet();
+        const text = pop.querySelector('textarea').value.trim();
+        if (text !== cur) Store.change(list === 'supps' ? { type: 'suppNote', date, id, text } : { type: 'note', date, id, text });
       },
     });
   }
 
+  function dayPop(el) {
+    const date = el.dataset.day, notes = (Core.dayOf(Store.data(), date) || {}).notes || [];
+    openPop(el, `<div class="ph">${pretty(date)}</div>` +
+      notes.map(n => `<div class="dn">${n.t ? `<span class="t">${n.t}</span>` : ''}<span class="x">${esc(n.text)}</span>` +
+        `<button class="del" data-pop="del" data-note="${n.id}" aria-label="Delete">×</button></div>`).join('') +
+      '<textarea rows="1"></textarea>', {
+      save: () => {
+        const text = pop.querySelector('textarea').value.trim();
+        if (text) Store.change({ type: 'dayNote', date, note: { id: Core.newId(), t: date === Core.today() ? Core.hhmm() : '', text } });
+      },
+      del: b => {
+        if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'delete?'; return; }
+        Store.change({ type: 'undayNote', date, id: b.dataset.note });
+        b.closest('.dn').remove();
+      },
+    });
+  }
+
+  function infoHtml(item, list) {
+    return `<div class="ih"><i style="background:${colorOf(item)}"></i>${esc(item.name)}` +
+      `${list === 'supps' && item.dose ? ` <span class="muted">${esc(item.dose)}</span>` : ''}</div>` +
+      (item.why ? `<p class="why">${esc(item.why)}</p>` : '') +
+      ((item.goals || []).length ? `<ul class="goals">${item.goals.map(g => `<li>${esc(g)}</li>`).join('')}</ul>` : '');
+  }
+
+  function infoPop(el) {
+    const { info: id, list } = el.dataset, item = Core.find(listOf(Store.config(), list), id);
+    openPop(el, infoHtml(item, list) + '<div class="row end"><button class="btn small" data-pop="archive">Archive</button></div>', {
+      archive: () => {
+        Store.change({ type: 'status', list: list === 'supps' ? 'supplements' : 'tasks', id, date: Core.today(), status: 'archived' });
+        closePop(false);
+      },
+    });
+  }
+
+  pop.addEventListener('click', ev => {
+    const b = ev.target.closest('[data-pop]');
+    if (b && popActs && popActs[b.dataset.pop]) popActs[b.dataset.pop](b);
+  });
+  pop.addEventListener('input', ev => { if (ev.target.tagName === 'TEXTAREA') grow(ev.target); });
+  pop.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') { ev.preventDefault(); closePop(false); }
+    else if (ev.key === 'Enter' && !ev.shiftKey && ev.target.tagName === 'TEXTAREA') { ev.preventDefault(); closePop(true); }
+  });
+  // A click outside saves and closes it (and doesn't also tick a box)
+  document.addEventListener('pointerdown', ev => {
+    if (!pop.hidden && !pop.contains(ev.target)) { closePop(true); swallowClick = true; }
+  }, true);
+
+  // Hovering a name shows what it's for (mouse only)
+  let tipTimer = null;
+  function showTip(el) {
+    const { info: id, list } = el.dataset, item = Core.find(listOf(Store.config(), list), id);
+    if (!item || (!item.why && !(item.goals || []).length)) return;
+    tip.innerHTML = infoHtml(item, list);
+    tip.hidden = false;
+    const r = el.getBoundingClientRect();
+    tip.style.left = Math.min(r.right + 12, innerWidth - 320) + 'px';
+    tip.style.top = r.top - 6 + 'px';
+    requestAnimationFrame(() => tip.classList.add('show'));
+  }
+  function hideTip() { clearTimeout(tipTimer); tip.classList.remove('show'); tip.hidden = true; }
+  if (canHover) {
+    main.addEventListener('pointerover', ev => {
+      const n = ev.target.closest('.name');
+      if (n && !n.contains(ev.relatedTarget) && pop.hidden) { clearTimeout(tipTimer); tipTimer = setTimeout(() => showTip(n), 250); }
+    });
+    main.addEventListener('pointerout', ev => {
+      const n = ev.target.closest('.name');
+      if (n && !n.contains(ev.relatedTarget)) hideTip();
+    });
+  }
+
+  // ---- Clicks, right-clicks, long presses on the page
+
+  let press = null;
+  main.addEventListener('pointerdown', ev => {
+    const el = ev.target.closest('.sq[data-id], .dh, .name');
+    if (!el || ev.pointerType === 'mouse') return;
+    press = { el, x: ev.clientX, y: ev.clientY, long: false };
+    press.timer = setTimeout(() => { press.long = true; longPress(el); }, 450);
+  });
+  const cancelPress = () => { if (press) clearTimeout(press.timer); };
+  main.addEventListener('pointermove', ev => { if (press && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) > 10) cancelPress(); });
+  main.addEventListener('pointerup', cancelPress);
+  main.addEventListener('pointercancel', cancelPress);
+
+  function longPress(el) {
+    if (el.matches('.sq')) notePop(el); else if (el.matches('.dh')) dayPop(el); else infoPop(el);
+  }
+
+  main.addEventListener('contextmenu', ev => {
+    const el = ev.target.closest('.sq[data-id], .dh, .name');
+    if (!el) return;
+    ev.preventDefault();
+    if (!press || !press.long) longPress(el);
+  });
+
+  main.addEventListener('click', ev => {
+    if (swallowClick) { swallowClick = false; return; }
+    const el = ev.target.closest('button');
+    if (!el) return;
+    if (press && press.long && press.el === el) { press = null; return; }
+    press = null;
+    const ds = el.dataset;
+    if (ds.id && ds.date) return ev.ctrlKey || ev.altKey || ev.metaKey ? notePop(el) : tap(el);
+    if (ds.day) return dayPop(el);
+    if (ds.info) return infoPop(el);
+    if (ds.act === 'settings') return openSettings();
+  });
+
+  // ---- Panels (gym, settings): a sheet over the page
+
+  let sheetRender = null;
+  function openSheet(fn) {
+    closePop(true);
+    sheetRender = fn;
+    sheetEl.hidden = false;
+    renderSheet();
+    requestAnimationFrame(() => sheetEl.classList.add('show'));
+  }
+  function renderSheet() { if (sheetRender) sheetEl.innerHTML = `<div class="panel">${sheetRender()}</div>`; }
+  function closeSheet() {
+    sheetEl.classList.remove('show');
+    sheetEl.hidden = true;
+    sheetEl.innerHTML = '';
+    sheetRender = null;
+    render();
+  }
+  const sheetHead = title => `<div class="sh"><span>${title}</span><button class="x" data-close aria-label="Close">×</button></div>`;
+
   // ---- Gym: the day's exercises; pick one (recent first), last time's sets prefilled, add sets
+
+  const kgText = k => (k == null ? 'BW' : String(k));
+  const parseKg = s => { s = String(s).trim().replace(',', '.'); const n = parseFloat(s); return s === '' || isNaN(n) ? null : n; };
+  // "45 × 10, 10, 8 · 47.5 × 8": consecutive sets with the same weight share it, like the Telegram notes
+  function fmtSets(sets) {
+    const groups = [];
+    for (const [k, r] of sets) {
+      const g = groups[groups.length - 1];
+      if (g && g.k === k) g.r.push(r ?? '?'); else groups.push({ k, r: [r ?? '?'] });
+    }
+    return groups.map(g => `${kgText(g.k)} × ${g.r.join(', ')}`).join(' · ');
+  }
+
+  const gym = { date: null, ex: null, picking: false, search: '', next: null, armed: -1 };
+  function openGym(date) {
+    Object.assign(gym, { date, ex: null, picking: false, search: '', next: null, armed: -1 });
+    openSheet(gymView);
+  }
 
   // name -> [{date, sets, note}], oldest first
   function gymHistory() {
@@ -220,35 +393,32 @@
   const exOf = (d, name) => ((gymDay(d) || {}).ex || []).find(e => e.name === name) || null;
 
   function gymView() {
-    if (ui.ex) return exerciseView();
-    if (ui.picking) return pickerView();
-    const d = ui.gymDate, gym = gymDay(d), ex = (gym && gym.ex) || [];
-    return `<div class="narrow">${datebar(d)}
-      ${ex.map(e => `<button class="exrow" data-ex="${esc(e.name)}">${esc(e.name)}<small>${esc(fmtSets(e.sets))}${e.note ? ' · ' + esc(e.note) : ''}</small></button>`).join('')}
-      <button class="btn wide primary big" data-act="pick">+ exercise</button>
-      <h4>Note</h4>
-      <input id="gnote" placeholder="sleep, food, how it went" value="${esc(gym && gym.note)}">
-      ${!gym ? '<button class="btn wide" data-act="went">Went, no details</button>' : !ex.length ? '<button class="btn wide" data-act="notgym">Not a gym day</button>' : ''}
-    </div>`;
+    if (gym.ex) return exerciseView();
+    if (gym.picking) return pickerView();
+    const g = gymDay(gym.date), ex = (g && g.ex) || [];
+    return sheetHead(`gym · ${pretty(gym.date)}`) +
+      ex.map(e => `<button class="exrow" data-ex="${esc(e.name)}">${esc(e.name)}<small>${esc(fmtSets(e.sets))}${e.note ? ' · ' + esc(e.note) : ''}</small></button>`).join('') +
+      '<button class="btn wide primary big" data-g="pick">+ exercise</button>' +
+      `<label>note<input id="gnote" value="${esc(g && g.note)}"></label>` +
+      (!g ? '<button class="btn wide" data-g="went">Went, no details</button>' : !ex.length ? '<button class="btn wide" data-g="notgym">Not a gym day</button>' : '');
   }
 
   function pickerView() {
-    return `<div class="narrow"><div class="row"><button class="back" data-act="back" aria-label="Back">‹</button>
-      <input id="search" placeholder="find or add an exercise" autocomplete="off" autocapitalize="off" value="${esc(ui.search)}"></div>
-      <div id="picklist">${pickList()}</div></div>`;
+    return `<div class="row"><button class="back" data-g="back" aria-label="Back">‹</button>` +
+      `<input id="search" aria-label="Find or add an exercise" autocomplete="off" autocapitalize="off" value="${esc(gym.search)}"></div>` +
+      `<div id="picklist">${pickList()}</div>`;
   }
 
   function pickList() {
-    const hist = gymHistory(), d = ui.gymDate, q = ui.search.trim().toLowerCase();
+    const hist = gymHistory(), q = gym.search.trim().toLowerCase();
     const list = Object.keys(hist).map(name => {
-      const before = hist[name].filter(x => x.date < d).pop();
-      const last = before || hist[name][hist[name].length - 1];
-      return { name, last, today: hist[name].some(x => x.date === d) };
+      const before = hist[name].filter(x => x.date < gym.date).pop();
+      return { name, last: before || hist[name][hist[name].length - 1], today: hist[name].some(x => x.date === gym.date) };
     }).sort((a, b) => (a.last.date < b.last.date ? 1 : a.last.date > b.last.date ? -1 : 0));
     const shown = q ? list.filter(e => e.name.includes(q)) : list;
     const add = q && !list.some(e => e.name === q) ? `<button class="pick new" data-pick="${esc(q)}">+ add “${esc(q)}”</button>` : '';
-    return add + shown.map(e => `<button class="pick" data-pick="${esc(e.name)}">${esc(e.name)}${e.today ? '<span class="badge">today</span>' : ''}
-      <small>${rel(e.last.date)} · ${esc(fmtSets(e.last.sets))}</small></button>`).join('');
+    return add + shown.map(e => `<button class="pick" data-pick="${esc(e.name)}">${esc(e.name)}${e.today ? '<span class="badge">today</span>' : ''}` +
+      `<small>${rel(e.last.date)} · ${esc(fmtSets(e.last.sets))}</small></button>`).join('');
   }
 
   // Next set: the same set from last time, else today's last set, else last time's last set
@@ -261,210 +431,149 @@
   }
 
   function exerciseView() {
-    const name = ui.ex, d = ui.gymDate, e = exOf(d, name), sets = (e && e.sets) || [];
-    const prev = previous(name, d);
-    const next = ui.next || prefill(sets, prev);
-    return `<div class="narrow"><div class="row"><button class="back" data-act="back" aria-label="Back">‹</button><h3 style="margin:0">${esc(name)}</h3></div>
-      <p class="muted small">${prev ? `last time, ${rel(prev.date)}: ${esc(fmtSets(prev.sets))}${prev.note ? ' · ' + esc(prev.note) : ''}` : 'first time'}</p>
-      <ol class="sets">${sets.map((s, i) => `<li><span><span class="n">${i + 1}</span>${kgText(s[0])} × ${s[1] ?? '?'}</span>
-        <button class="del${ui.armed === i ? ' armed' : ''}" data-del="${i}">${ui.armed === i ? 'delete?' : '✕'}</button></li>`).join('')}</ol>
-      <div class="steppers">
-        <div class="stepper"><label>kg (BW = bodyweight)</label><div class="ctl"><button data-step="kg,-1">−</button>
-          <input id="kg" inputmode="decimal" value="${kgText(next[0])}"><button data-step="kg,1">+</button></div></div>
-        <div class="stepper"><label>reps</label><div class="ctl"><button data-step="reps,-1">−</button>
-          <input id="reps" inputmode="numeric" value="${next[1] ?? ''}"><button data-step="reps,1">+</button></div></div>
-      </div>
-      <button class="btn wide primary big" data-act="addset">Add set ${sets.length + 1}</button>
-      ${sets.length ? `<h4>Note</h4><input id="exnote" placeholder="form, pain, machine" value="${esc(e.note)}">` : ''}
-    </div>`;
+    const e = exOf(gym.date, gym.ex), sets = (e && e.sets) || [], prev = previous(gym.ex, gym.date);
+    const next = gym.next || prefill(sets, prev);
+    return `<div class="row"><button class="back" data-g="back" aria-label="Back">‹</button><h3 class="grow">${esc(gym.ex)}</h3>` +
+      `<button class="x" data-close aria-label="Close">×</button></div>` +
+      `<p class="muted small">${prev ? `last time, ${rel(prev.date)}: ${esc(fmtSets(prev.sets))}${prev.note ? ' · ' + esc(prev.note) : ''}` : 'first time'}</p>` +
+      `<ol class="sets">${sets.map((s, i) => `<li><span><span class="n">${i + 1}</span>${kgText(s[0])} × ${s[1] ?? '?'}</span>` +
+        `<button class="del${gym.armed === i ? ' armed' : ''}" data-del="${i}">${gym.armed === i ? 'delete?' : '✕'}</button></li>`).join('')}</ol>` +
+      `<div class="steppers">
+        <div class="stepper"><span class="lbl">kg (BW = bodyweight)</span><div class="ctl"><button data-step="kg,-1">−</button>` +
+        `<input id="kg" inputmode="decimal" value="${kgText(next[0])}"><button data-step="kg,1">+</button></div></div>
+        <div class="stepper"><span class="lbl">reps</span><div class="ctl"><button data-step="reps,-1">−</button>` +
+        `<input id="reps" inputmode="numeric" value="${next[1] ?? ''}"><button data-step="reps,1">+</button></div></div>
+      </div>` +
+      `<button class="btn wide primary big" data-g="addset">Add set ${sets.length + 1}</button>` +
+      (sets.length ? `<label>note<input id="exnote" value="${esc(e.note)}"></label>` : '');
   }
 
   function step(field, dir) {
     const el = $('#' + field);
-    if (field === 'kg') {
-      const k = parseKg(el.value) ?? 0;
-      el.value = kgText(Math.round((k + dir * 2.5) * 100) / 100);
-    } else {
-      el.value = Math.max(0, (parseInt(el.value, 10) || 0) + dir);
-    }
-    ui.next = [parseKg($('#kg').value), parseInt($('#reps').value, 10)];
+    if (field === 'kg') el.value = kgText(Math.round(((parseKg(el.value) ?? 0) + dir * 2.5) * 100) / 100);
+    else el.value = Math.max(0, (parseInt(el.value, 10) || 0) + dir);
+    gym.next = [parseKg($('#kg').value), parseInt($('#reps').value, 10)];
   }
 
   function addSet() {
-    const d = ui.gymDate, e = exOf(d, ui.ex);
-    const reps = parseInt($('#reps').value, 10);
+    const e = exOf(gym.date, gym.ex), reps = parseInt($('#reps').value, 10);
     const sets = ((e && e.sets) || []).concat([[parseKg($('#kg').value), isNaN(reps) ? null : reps]]);
-    Store.change({ type: 'gymEx', date: d, name: ui.ex, sets });
-    ui.next = null;
-    ui.armed = -1;
-    render();
+    Store.change({ type: 'gymEx', date: gym.date, name: gym.ex, sets });
+    gym.next = null;
+    gym.armed = -1;
+    renderSheet();
   }
 
   function deleteSet(i) {
-    if (ui.armed !== i) { ui.armed = i; render(); setTimeout(() => { if (ui.armed === i) { ui.armed = -1; render(); } }, 3000); return; }
-    const d = ui.gymDate, e = exOf(d, ui.ex);
-    Store.change({ type: 'gymEx', date: d, name: ui.ex, sets: e.sets.filter((_, j) => j !== i), note: e.note });
-    ui.armed = -1;
-    render();
-  }
-
-  // ---- Settings
-
-  function openSettings() {
-    const s = Store.settings, st = Store.status();
-    const last = st.last ? `Last synced ${Core.hhmm(new Date(st.last))}.` : '';
-    sheet(`<h3>Settings</h3>
-      ${Store.LOCAL ? '<p class="muted small">Local test server: no token needed, data stays on this PC.</p>' : `
-      <label>GitHub token<input id="token" type="password" autocomplete="off" value="${esc(s.token)}" placeholder="github_pat_…"></label>
-      <p class="muted small">A fine-grained token with access to the daily-widget repo only, permission Contents: read and write.
-        <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create one on GitHub</a></p>`}
-      <label>This device<input id="device" value="${esc(s.device)}"></label>
-      <p class="muted small">${st.error ? esc(st.error) + '. ' : ''}${last} ${Store.waiting() ? Store.waiting() + ' changes waiting.' : ''}</p>
-      <div class="row end"><button class="btn" data-act="sync">Sync now</button><button class="btn primary" data-act="save">Save</button></div>`, {
-      sync: () => { Store.sync(); closeSheet(); },
-      save: () => {
-        const tok = $('#token');
-        Store.setSettings({ device: $('#device').value.trim() || s.device, ...(tok ? { token: tok.value.trim() } : {}) });
-        closeSheet();
-        render();
-      },
-    });
-  }
-
-  // ---- Bottom sheet
-
-  let actions = {};
-  function sheet(html, acts) {
-    actions = acts || {};
-    sheetEl.innerHTML = `<div class="panel">${html}</div>`;
-    sheetEl.hidden = false;
-  }
-  function closeSheet() {
-    sheetEl.hidden = true;
-    sheetEl.innerHTML = '';
-    if (deferred) render();
-  }
-  sheetEl.addEventListener('click', ev => {
-    if (ev.target === sheetEl) return closeSheet();
-    const b = ev.target.closest('[data-act]');
-    if (!b) return;
-    if (b.dataset.act === 'close') closeSheet();
-    else if (actions[b.dataset.act]) actions[b.dataset.act](b);
-  });
-
-  // ---- Taps: a short tap acts, a long press (or right-click) opens the note or details
-
-  let press = null;
-  main.addEventListener('pointerdown', ev => {
-    const t = ev.target.closest('[data-task], [data-sup]');
-    if (!t) return;
-    press = { el: t, x: ev.clientX, y: ev.clientY, long: false };
-    press.timer = setTimeout(() => { press.long = true; longPress(t); }, 450);
-  });
-  const cancelPress = () => { if (press) clearTimeout(press.timer); };
-  main.addEventListener('pointermove', ev => { if (press && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) > 10) cancelPress(); });
-  main.addEventListener('pointerup', cancelPress);
-  main.addEventListener('pointercancel', cancelPress);
-  main.addEventListener('contextmenu', ev => {
-    const t = ev.target.closest('[data-task], [data-sup]');
-    if (!t) return;
-    ev.preventDefault();
-    cancelPress();
-    if (!press || !press.long) longPress(t);
-  });
-
-  function longPress(t) {
-    if (t.dataset.task) openNote(t.dataset.task, t.dataset.date);
-    else supplementSheet(t.dataset.sup);
-  }
-
-  main.addEventListener('click', ev => {
-    const el = ev.target.closest('button');
-    if (!el) return;
-    if (press && press.long && press.el === el) { press = null; return; }
-    press = null;
-    const ds = el.dataset;
-    if (ds.task) return tapCell(ds.task, ds.date);
-    if (ds.sup) {
-      const log = (Core.dayOf(Store.data(), ui.logDate) || {}).log || [];
-      const taken = log.filter(e => e.kind === 'supplement' && e.item === ds.sup).pop();
-      return taken ? entrySheet(taken.id) : addSupplement(ds.sup);
-    }
-    if (ds.entry) return entrySheet(ds.entry);
-    if (ds.nav) {
-      const key = ui.tab === 'log' ? 'logDate' : 'gymDate';
-      const d = Core.addDays(ui[key], +ds.nav);
-      if (d <= Core.today()) { ui[key] = d; render(); }
+    if (gym.armed !== i) {
+      gym.armed = i;
+      renderSheet();
+      setTimeout(() => { if (gym.armed === i) { gym.armed = -1; if (sheetRender === gymView) renderSheet(); } }, 3000);
       return;
     }
-    if (ds.ex) { ui.ex = ds.ex; ui.next = null; ui.armed = -1; return render(); }
-    if (ds.pick) { ui.ex = ds.pick.trim().toLowerCase(); ui.picking = false; ui.search = ''; ui.next = null; ui.armed = -1; return render(); }
+    const e = exOf(gym.date, gym.ex);
+    Store.change({ type: 'gymEx', date: gym.date, name: gym.ex, sets: e.sets.filter((_, j) => j !== i), note: e.note });
+    gym.armed = -1;
+    renderSheet();
+  }
+
+  function gymClick(el) {
+    const ds = el.dataset;
+    if (ds.ex) { gym.ex = ds.ex; gym.next = null; gym.armed = -1; return renderSheet(); }
+    if (ds.pick) { gym.ex = ds.pick.trim().toLowerCase(); gym.picking = false; gym.search = ''; gym.next = null; gym.armed = -1; return renderSheet(); }
     if (ds.step) { const [f, dir] = ds.step.split(','); return step(f, +dir); }
     if (ds.del) return deleteSet(+ds.del);
-    switch (ds.act) {
-      case 'settings': return openSettings();
-      case 'feel': {
-        const text = $('#feel').value.trim();
-        if (!text) return;
-        Store.change({ type: 'log', date: ui.logDate, entry: { id: Core.newId(), t: Core.hhmm(), kind: 'feeling', text } });
-        ui.feel = '';
-        $('#feel').value = '';
-        $('#feel').blur();
-        return render();
-      }
-      case 'pick': ui.picking = true; ui.search = ''; return render();
-      case 'back': if (ui.ex) ui.ex = null; else ui.picking = false; ui.next = null; return render();
+    switch (ds.g) {
+      case 'pick': gym.picking = true; gym.search = ''; renderSheet(); return $('#search') && $('#search').focus();
+      case 'back': if (gym.ex) gym.ex = null; else gym.picking = false; gym.next = null; return renderSheet();
       case 'addset': return addSet();
-      case 'went': return Store.change({ type: 'gymDay', date: ui.gymDate, on: true });
-      case 'notgym': return Store.change({ type: 'gymDay', date: ui.gymDate, on: false });
+      case 'went': Store.change({ type: 'gymDay', date: gym.date, on: true }); return renderSheet();
+      case 'notgym': Store.change({ type: 'gymDay', date: gym.date, on: false }); return renderSheet();
     }
-  });
+  }
 
-  main.addEventListener('input', ev => {
-    if (ev.target.id === 'search') { ui.search = ev.target.value; $('#picklist').innerHTML = pickList(); }
-    if (ev.target.id === 'feel') ui.feel = ev.target.value;
-    if (ev.target.id === 'kg' || ev.target.id === 'reps') ui.next = [parseKg($('#kg').value), parseInt($('#reps').value, 10)];
+  // ---- Settings: token, this device, colors, archived things
+
+  function openSettings() { openSheet(settingsView); }
+
+  function settingsView() {
+    const s = Store.settings, st = Store.status(), cfg = Store.config(), now = Core.today();
+    const archived = [...(cfg.tasks || []).map(t => ['tasks', t]), ...(cfg.supplements || []).map(t => ['supplements', t])]
+      .filter(([, t]) => { const x = Core.statusOn(t, now); return x && x !== 'active'; });
+    const last = st.last ? `Last synced ${Core.hhmm(new Date(st.last))}.` : '';
+    return sheetHead('Settings') +
+      (Store.LOCAL ? '<p class="muted small">Local test server: no token needed, data stays on this PC.</p>' :
+        `<label>GitHub token<input id="token" type="password" autocomplete="off" value="${esc(s.token)}"></label>
+        <p class="muted small">Fine-grained, for the daily-widget repo only, Contents: read and write.
+        <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create one on GitHub</a></p>`) +
+      `<label>This device<input id="device" value="${esc(s.device)}"></label>` +
+      `<label class="check"><input type="checkbox" id="colors"${prefs.colors ? ' checked' : ''}> A color per task (off: all green)</label>` +
+      (archived.length ? '<h4>Archived</h4>' + archived.map(([list, t]) =>
+        `<div class="arow"><span>${esc(t.name)}</span><button class="btn small" data-s="restore" data-list="${list}" data-id="${t.id}">Restore</button></div>`).join('') : '') +
+      `<p class="muted small">${st.error ? esc(st.error) + '. ' : ''}${last} ${Store.waiting() ? Store.waiting() + ' changes waiting.' : ''}</p>` +
+      '<div class="row end"><button class="btn" data-s="sync">Sync now</button><button class="btn primary" data-s="save">Save</button></div>';
+  }
+
+  function settingsClick(el) {
+    switch (el.dataset.s) {
+      case 'sync': Store.sync(); return closeSheet();
+      case 'restore':
+        Store.change({ type: 'status', list: el.dataset.list, id: el.dataset.id, date: Core.today(), status: 'active' });
+        return renderSheet();
+      case 'save': {
+        const tok = $('#token');
+        Store.setSettings({ device: $('#device').value.trim() || Store.settings.device, ...(tok ? { token: tok.value.trim() } : {}) });
+        return closeSheet();
+      }
+    }
+  }
+
+  sheetEl.addEventListener('click', ev => {
+    if (ev.target === sheetEl) return closeSheet();
+    const el = ev.target.closest('button');
+    if (!el) return;
+    if ('close' in el.dataset) return closeSheet();
+    if (sheetRender === gymView) gymClick(el); else settingsClick(el);
   });
-  main.addEventListener('change', ev => {
-    const id = ev.target.id, d = ui.gymDate;
-    if (id === 'gnote') Store.change({ type: 'gymNote', date: d, text: ev.target.value.trim() });
-    if (id === 'exnote') { const e = exOf(d, ui.ex); if (e) Store.change({ type: 'gymEx', date: d, name: ui.ex, sets: e.sets, note: ev.target.value.trim() }); }
+  sheetEl.addEventListener('input', ev => {
+    const id = ev.target.id;
+    if (id === 'search') { gym.search = ev.target.value; $('#picklist').innerHTML = pickList(); }
+    if (id === 'kg' || id === 'reps') gym.next = [parseKg($('#kg').value), parseInt($('#reps').value, 10)];
   });
-  main.addEventListener('keydown', ev => {
+  sheetEl.addEventListener('change', ev => {
+    const id = ev.target.id;
+    if (id === 'gnote') Store.change({ type: 'gymNote', date: gym.date, text: ev.target.value.trim() });
+    if (id === 'exnote') { const e = exOf(gym.date, gym.ex); if (e) Store.change({ type: 'gymEx', date: gym.date, name: gym.ex, sets: e.sets, note: ev.target.value.trim() }); }
+    if (id === 'colors') { prefs.colors = ev.target.checked; savePrefs(); render(); }
+  });
+  sheetEl.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') return closeSheet();
     if (ev.key !== 'Enter') return;
-    if (ev.target.id === 'search' && ui.search.trim()) {
-      const first = $('#picklist [data-pick]');
-      if (first) first.click();
-    } else if (ev.target.id === 'kg' || ev.target.id === 'reps') addSet();
-    else if (ev.target.id === 'gnote' || ev.target.id === 'exnote') ev.target.blur();
+    const id = ev.target.id;
+    if (id === 'search' && gym.search.trim()) { const first = $('#picklist [data-pick]'); if (first) first.click(); }
+    else if (id === 'kg' || id === 'reps') addSet();
+    else if (id === 'gnote' || id === 'exnote') ev.target.blur();
   });
-  document.addEventListener('focusout', () => setTimeout(() => { if (deferred && !typing() && sheetEl.hidden) render(); }, 0));
 
-  $('#tabs').addEventListener('click', ev => {
-    const b = ev.target.closest('[data-tab]');
-    if (!b) return;
-    if (b.dataset.tab === 'gym' && ui.tab === 'gym') { ui.ex = null; ui.picking = false; }   // gym again: back to the day
-    go(b.dataset.tab);
-  });
+  // ---- Keeping it current
+
   $('#gear').addEventListener('click', openSettings);
   statusEl.addEventListener('click', () => (Store.ready() && Store.status().state !== 'error' ? Store.sync() : openSettings()));
 
   Store.onChange(what => {
     if (what === 'status') return renderStatus();
-    if (typing() || !sheetEl.hidden) { deferred = true; renderStatus(); return; }
+    if (!pop.hidden || typing()) { deferred = true; return renderStatus(); }
     render();
+    if (!sheetEl.hidden) renderSheet();
   });
+  document.addEventListener('focusout', () => setTimeout(() => { if (deferred && !typing() && pop.hidden) render(); }, 0));
 
   let resizeTimer;
-  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (ui.tab === 'days' && !typing()) render(); }, 150); });
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    // Back after midnight: move "today" along
-    const now = Core.today();
-    if (ui.logDate < now && ui.logDate === Core.addDays(now, -1)) ui.logDate = now;
-    if (ui.gymDate < now && ui.gymDate === Core.addDays(now, -1) && !ui.ex) ui.gymDate = now;
-    if (!typing()) render();
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (!typing() && pop.hidden) render(); }, 150);
   });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !typing() && pop.hidden) render(); });
 
   render();
   Store.sync();

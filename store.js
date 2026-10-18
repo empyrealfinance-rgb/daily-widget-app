@@ -93,22 +93,27 @@ const Store = (() => {
   }
 
   function message(ops) {
-    const kinds = { task: 'tasks', note: 'notes', log: 'log', unlog: 'log', gymDay: 'gym', gymNote: 'gym', gymEx: 'gym' };
-    const what = [...new Set(ops.map(q => kinds[q.op.type]))].join(', ');
+    const kinds = { task: 'tasks', note: 'notes', supp: 'supplements', suppNote: 'notes', dayNote: 'day notes', undayNote: 'day notes',
+      gymDay: 'gym', gymNote: 'gym', gymEx: 'gym', status: 'archive' };
+    const what = [...new Set(ops.map(q => kinds[q.op.type] || q.op.type))].join(', ');
     const dates = [...new Set(ops.map(q => q.op.date))].sort();
     return `${settings.device}: ${what} ${dates.join(', ')}`;
   }
+
+  // config.json takes status changes (archive, restore); the month files take everything else.
+  const isConfig = path => path === 'config.json';
+  const applyTo = (path, json, op) => (isConfig(path) ? Core.applyConfig(json, op) : Core.apply(json, op));
 
   // Returns true when the file had changed elsewhere (so the screen should show the merged file).
   async function save(path, ops) {
     for (let attempt = 0; ; attempt++) {
       const base = files[path];
-      const json = base ? structuredClone(base.json) : { days: {} };
-      ops.forEach(q => Core.apply(json, q.op));
+      const json = base ? structuredClone(base.json) : isConfig(path) ? { tasks: [], supplements: [] } : { days: {} };
+      ops.forEach(q => applyTo(path, json, q.op));
       try {
         const r = await call('PUT', path, {
           message: message(ops),
-          content: Core.toB64(Core.serialize(json)),
+          content: Core.toB64(isConfig(path) ? Core.serializeConfig(json) : Core.serialize(json)),
           sha: base ? base.sha : undefined,
           branch: 'main',
         });
@@ -153,7 +158,7 @@ const Store = (() => {
   }
 
   function change(op) {
-    queue.push({ path: `data/${Core.monthOf(op.date)}.json`, op });
+    queue.push({ path: op.type === 'status' ? 'config.json' : `data/${Core.monthOf(op.date)}.json`, op });
     write(KEY.queue, queue);
     notify('data');
     setStatus({ state: 'waiting' });
@@ -161,26 +166,32 @@ const Store = (() => {
     timer = setTimeout(() => flush(), 1500);
   }
 
+  // config.json, waiting changes (archive, restore) included
   function config() {
-    const c = files['config.json'];
-    return c ? c.json : { tasks: [], supplements: [] };
+    return views().config;
   }
 
   // All months as Core wants them: { "2026-10": {days: {...}}, ... }, waiting changes included.
   function data() {
+    return views().data;
+  }
+
+  function views() {
     if (cachedVersion === version && cached) return cached;
     const out = {};
+    const c = files['config.json'] ? structuredClone(files['config.json'].json) : { tasks: [], supplements: [] };
     for (const path in files) {
       const m = path.match(/^data\/(\d{4}-\d{2})\.json$/);
       if (m) out[m[1]] = structuredClone(files[path].json);
     }
     for (const q of queue) {
+      if (isConfig(q.path)) { Core.applyConfig(c, q.op); continue; }
       const m = Core.monthOf(q.op.date);
       Core.apply(out[m] || (out[m] = { days: {} }), q.op);
     }
-    cached = out;
+    cached = { config: c, data: out };
     cachedVersion = version;
-    return out;
+    return cached;
   }
 
   function setSettings(s) {

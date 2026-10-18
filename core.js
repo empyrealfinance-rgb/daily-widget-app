@@ -1,4 +1,4 @@
-// The rules: what each square shows, and how a change is written into a month file.
+// The rules: what each square shows, and how a change is written into a month file or the config.
 // Shared by the web app and the laptop desk widget (desk\daily_widget.ahk runs this file in
 // Windows' built-in IE11 script engine), so ES5 only: var and function, no arrows, let,
 // classes or template strings.
@@ -6,7 +6,7 @@
 var Core = (function () {
   var WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
-  // ---- Dates: 'YYYY-MM-DD' strings in local time
+  // ---- Dates: 'YYYY-MM-DD' strings in local time; weeks start on Monday
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
@@ -20,14 +20,22 @@ var Core = (function () {
   function monthOf(s) { return s.slice(0, 7); }
   function daysInMonth(s) { var d = parse(s); return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); }
 
-  // ---- Lifecycle: item.status = [["2026-10-17", "active"], ["2026-12-01", "paused"], ...]
-  // Before the first date the item didn't exist yet.
+  // n whole weeks, Monday to Sunday, the last one being this week
+  function weeks(now, n) {
+    var start = addDays(monday(now), -7 * (n - 1)), out = [];
+    for (var i = 0; i < 7 * n; i++) out.push(addDays(start, i));
+    return out;
+  }
+
+  // ---- Lifecycle: item.status = [["2026-10-17", "active"], ["2026-12-01", "archived"], ...]
+  // Before the first date it didn't exist yet. Only active items are on screen; the data stays.
 
   function statusOn(item, date) {
     var s = null, h = item.status || [];
     for (var i = 0; i < h.length; i++) if (h[i][0] <= date) s = h[i][1];
     return s;
   }
+  function find(list, id) { for (var i = 0; i < (list || []).length; i++) if (list[i].id === id) return list[i]; return null; }
 
   // ---- Tasks
 
@@ -67,20 +75,31 @@ var Core = (function () {
     return false;
   }
 
+  // A record (caffeine) that broke its rule that day: not with `onlyWith` (gym), or two days in a row.
+  function broken(task, data, date, config) {
+    var other = task.onlyWith && find(config && config.tasks, task.onlyWith);
+    if (other && !isDone(other, data, date)) return true;
+    return !!task.notInARow && isDone(task, data, addDays(date, -1));
+  }
+
   // What one square shows:
-  //   done    green
+  //   done    the task's color
+  //   flag    done, but against its rule (caffeine on a day without gym): color with a dot
   //   todo    today, still open
   //   missed  grey with a small dot
-  //   open    due or possible that day, nothing to show (faint square, tappable)
+  //   open    possible that day, nothing to show (faint square, tappable)
+  //   future  a day still to come
   //   none    not due that day (no square)
-  //   off     paused, retired or not started yet
-  function cell(task, data, date, now) {
+  //   off     before the task existed, or paused / archived then
+  function cell(task, data, date, now, config) {
     now = now || today();
     if (statusOn(task, date) !== 'active') return 'off';
     var w = windowOf(task, date);
     if (!w) return 'none';
-    if (isDone(task, data, date)) return 'done';
-    if (date > now) return 'open';
+    var done = isDone(task, data, date);
+    if (date > now) return done ? 'done' : 'future';
+    if (task.kind === 'record') return !done ? 'open' : date < now && broken(task, data, date, config) ? 'flag' : 'done';
+    if (done) return 'done';
     if (task.kind === 'gym' || task.must === false) return date === now ? 'todo' : 'open';
     if (w[0] !== w[1]) {
       // A window of several days (24h fast, month end): done once anywhere in it is enough.
@@ -100,7 +119,6 @@ var Core = (function () {
   // A few words beside the name: "2/3" (gym this week), "5 days left" (fast, month end).
   function hint(task, data, now) {
     now = now || today();
-    if (statusOn(task, now) !== 'active') return '';
     if (task.kind === 'gym') return weekCount(task, data, now) + '/' + task.perWeek;
     if (task.kind === 'every' || task.kind === 'monthEnd') {
       var w = windowOf(task, now);
@@ -112,20 +130,45 @@ var Core = (function () {
     return '';
   }
 
-  // Everything a grid needs: one row per active-ish task, one cell per date.
+  function rowOf(item, cells, extra) {
+    var r = { id: item.id, name: item.name, color: item.color || '', why: item.why || '', goals: item.goals || [], cells: cells };
+    for (var k in extra) if (extra.hasOwnProperty(k)) r[k] = extra[k];
+    return r;
+  }
+
+  // The grid: one row per task active today (in config order), one cell per date.
   function rows(config, data, dates, now) {
     now = now || today();
-    var out = [];
-    var tasks = config.tasks || [];
+    var out = [], tasks = config.tasks || [];
     for (var i = 0; i < tasks.length; i++) {
-      var t = tasks[i], cells = [], shown = false;
+      var t = tasks[i], cells = [];
+      if (statusOn(t, now) !== 'active') continue;
       for (var j = 0; j < dates.length; j++) {
-        var st = cell(t, data, dates[j], now), e = entryOf(t, data, dates[j]);
-        if (st !== 'off') shown = true;
-        cells.push({ date: dates[j], state: st, note: (e && e.note) || '' });
+        var e = entryOf(t, data, dates[j]);
+        cells.push({ date: dates[j], state: cell(t, data, dates[j], now, config), note: (e && e.note) || '' });
       }
-      if (!shown) continue;
-      out.push({ id: t.id, name: t.name, kind: t.kind, optional: t.must === false, hint: hint(t, data, now), cells: cells });
+      out.push(rowOf(t, cells, { kind: t.kind, optional: t.must === false, hint: hint(t, data, now) }));
+    }
+    return out;
+  }
+
+  // Supplements: taken (with the time) or not; never "missed".
+  function suppOf(s, data, date) {
+    var d = dayOf(data, date);
+    return (d && d.supps && d.supps[s.id]) || null;
+  }
+  function suppRows(config, data, dates, now) {
+    now = now || today();
+    var out = [], list = config.supplements || [];
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i], cells = [];
+      if (statusOn(s, now) !== 'active') continue;
+      for (var j = 0; j < dates.length; j++) {
+        var e = suppOf(s, data, dates[j]), d = dates[j];
+        var st = statusOn(s, d) !== 'active' ? 'off' : e && e.taken ? 'done' : d > now ? 'future' : 'open';
+        cells.push({ date: d, state: st, note: (e && e.note) || '', t: (e && e.t) || '' });
+      }
+      out.push(rowOf(s, cells, { kind: 'supplement', optional: false, hint: s.dose || '' }));
     }
     return out;
   }
@@ -136,7 +179,10 @@ var Core = (function () {
   function apply(m, op) {
     m.days = m.days || {};
     var d = m.days[op.date] || (m.days[op.date] = {});
-    var i, t;
+    var i, t, e = op.entry;
+    // The first version wrote supplements and feelings as "log" entries: read those as the new kinds
+    if (op.type === 'log' && e && e.kind === 'supplement') op = { type: 'supp', date: op.date, id: e.item, on: true, t: e.t, dose: e.dose };
+    else if (op.type === 'log' && e) op = { type: 'dayNote', date: op.date, note: { id: e.id, t: e.t, text: e.text || '' } };
     if (op.type === 'task') {
       d.tasks = d.tasks || {};
       t = d.tasks[op.id] || (d.tasks[op.id] = {});
@@ -145,13 +191,23 @@ var Core = (function () {
       d.tasks = d.tasks || {};
       t = d.tasks[op.id] || (d.tasks[op.id] = {});
       if (op.text) t.note = op.text; else delete t.note;
-    } else if (op.type === 'log') {
-      d.log = d.log || [];
-      for (i = 0; i < d.log.length && d.log[i].id !== op.entry.id; i++);
-      d.log[i] = op.entry;
-      d.log.sort(function (a, b) { return a.t < b.t ? -1 : a.t > b.t ? 1 : 0; });
-    } else if (op.type === 'unlog') {
-      d.log = (d.log || []).filter(function (e) { return e.id !== op.id; });
+    } else if (op.type === 'supp') {
+      d.supps = d.supps || {};
+      t = d.supps[op.id] || (d.supps[op.id] = {});
+      if (op.on) { t.taken = true; if (op.t) t.t = op.t; if (op.dose) t.dose = op.dose; }
+      else { delete t.taken; delete t.t; delete t.dose; }
+    } else if (op.type === 'suppNote') {
+      d.supps = d.supps || {};
+      t = d.supps[op.id] || (d.supps[op.id] = {});
+      if (op.text) t.note = op.text; else delete t.note;
+    } else if (op.type === 'dayNote') {
+      // How the day went: a list of notes with the time, like a tiny diary
+      d.notes = d.notes || [];
+      for (i = 0; i < d.notes.length && d.notes[i].id !== op.note.id; i++);
+      if (op.note.text) d.notes[i] = op.note; else if (i < d.notes.length) d.notes.splice(i, 1);
+    } else if (op.type === 'unlog' || op.type === 'undayNote') {
+      d.notes = (d.notes || []).filter(function (n) { return n.id !== op.id; });
+      d.log = (d.log || []).filter(function (n) { return n.id !== op.id; });
     } else if (op.type === 'gymDay') {
       if (op.on) d.gym = d.gym || {}; else delete d.gym;
     } else if (op.type === 'gymNote') {
@@ -176,13 +232,26 @@ var Core = (function () {
   function isEmpty(o) { for (var k in o) if (o.hasOwnProperty(k)) return false; return true; }
 
   function tidy(m, date) {
-    var d = m.days[date];
-    if (d.tasks) {
-      for (var k in d.tasks) if (d.tasks.hasOwnProperty(k) && isEmpty(d.tasks[k])) delete d.tasks[k];
-      if (isEmpty(d.tasks)) delete d.tasks;
+    var d = m.days[date], k;
+    for (var part in { tasks: 1, supps: 1 }) {
+      if (!d[part]) continue;
+      for (k in d[part]) if (d[part].hasOwnProperty(k) && isEmpty(d[part][k])) delete d[part][k];
+      if (isEmpty(d[part])) delete d[part];
     }
+    if (d.notes && !d.notes.length) delete d.notes;
     if (d.log && !d.log.length) delete d.log;
     if (isEmpty(d)) delete m.days[date];
+  }
+
+  // ---- Changes to config.json: { type: 'status', list: 'tasks'|'supplements', id, date, status }
+
+  function applyConfig(c, op) {
+    var item = find(c[op.list], op.id);
+    if (!item || op.type !== 'status') return c;
+    var h = item.status || (item.status = []);
+    while (h.length && h[h.length - 1][0] >= op.date) h.pop();
+    if (statusOn(item, op.date) !== op.status) h.push([op.date, op.status]);
+    return c;
   }
 
   // ---- Files: readable JSON, days in order, short arrays and objects on one line
@@ -196,6 +265,8 @@ var Core = (function () {
     for (k in m) if (m.hasOwnProperty(k)) out[k] = k === 'days' ? days : m[k];
     return format(out, '') + '\n';
   }
+
+  function serializeConfig(c) { return format(c, '') + '\n'; }
 
   function format(v, ind) {
     var flat = JSON.stringify(v);
@@ -218,9 +289,10 @@ var Core = (function () {
 
   return {
     WEEKDAYS: WEEKDAYS, pad: pad, ymd: ymd, parse: parse, addDays: addDays, diffDays: diffDays, today: today,
-    hhmm: hhmm, weekday: weekday, monday: monday, monthOf: monthOf, statusOn: statusOn, dayOf: dayOf,
-    entryOf: entryOf, isDone: isDone, windowOf: windowOf, cell: cell, weekCount: weekCount, hint: hint,
-    rows: rows, apply: apply, serialize: serialize, toB64: toB64, fromB64: fromB64, newId: newId
+    hhmm: hhmm, weekday: weekday, monday: monday, monthOf: monthOf, weeks: weeks, statusOn: statusOn, find: find,
+    dayOf: dayOf, entryOf: entryOf, isDone: isDone, windowOf: windowOf, cell: cell, weekCount: weekCount,
+    hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, apply: apply, applyConfig: applyConfig,
+    serialize: serialize, serializeConfig: serializeConfig, toB64: toB64, fromB64: fromB64, newId: newId
   };
 })();
 
