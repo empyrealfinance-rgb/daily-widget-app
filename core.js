@@ -202,7 +202,7 @@ var Core = (function () {
     } else if (op.type === 'note') {
       d.tasks = d.tasks || {};
       t = d.tasks[op.id] || (d.tasks[op.id] = {});
-      if (op.text) t.note = op.text; else delete t.note;
+      if (op.text) { t.note = op.text; if (op.at) t.noteAt = op.at; } else { delete t.note; delete t.noteAt; }
     } else if (op.type === 'supp') {
       d.supps = d.supps || {};
       t = d.supps[op.id] || (d.supps[op.id] = {});
@@ -211,7 +211,7 @@ var Core = (function () {
     } else if (op.type === 'suppNote') {
       d.supps = d.supps || {};
       t = d.supps[op.id] || (d.supps[op.id] = {});
-      if (op.text) t.note = op.text; else delete t.note;
+      if (op.text) { t.note = op.text; if (op.at) t.noteAt = op.at; } else { delete t.note; delete t.noteAt; }
     } else if (op.type === 'dayText') {
       // The day's note: what it went into, how it went (one text per day). Older days had a list of
       // timed notes; writing the text takes those in.
@@ -223,11 +223,14 @@ var Core = (function () {
     } else if (op.type === 'sleep') {
       if (op.sleep) d.sleep = op.sleep; else delete d.sleep;
     } else if (op.type === 'dayNote') {
-      // How the day went: a list of notes with the time, like a tiny diary
+      // How the day went: notes with the time they're about (when written, or a moment picked on the day
+      // line); "" = no time (a summary). The older single text becomes the first of them.
       d.notes = d.notes || [];
+      if (d.text) { d.notes.unshift({ id: 'day', t: '', text: d.text }); delete d.text; }
       for (i = 0; i < d.notes.length && d.notes[i].id !== op.note.id; i++);
       if (op.note.text) d.notes[i] = op.note; else if (i < d.notes.length) d.notes.splice(i, 1);
     } else if (op.type === 'unlog' || op.type === 'undayNote') {
+      if (op.id === 'day') delete d.text;
       d.notes = (d.notes || []).filter(function (n) { return n.id !== op.id; });
       d.log = (d.log || []).filter(function (n) { return n.id !== op.id; });
     } else if (op.type === 'gymDay') {
@@ -269,11 +272,17 @@ var Core = (function () {
   // doesn't wipe a past day).
   function isSet(state) { return state === 'done' || state === 'flag'; }
 
-  // The day's note as text (older days: their timed notes, one per line)
+  // The day's notes, by time; ones without a time (summaries) last
+  function dayNotes(data, date) {
+    var d = dayOf(data, date) || {}, out = [];
+    if (d.text) out.push({ id: 'day', t: '', text: d.text });
+    for (var i = 0; i < (d.notes || []).length; i++) out.push(d.notes[i]);
+    return out.sort(function (a, b) { return (a.t || '99') < (b.t || '99') ? -1 : (a.t || '99') > (b.t || '99') ? 1 : 0; });
+  }
+  // ... as text, one per line ("14:32 text")
   function dayText(data, date) {
-    var d = dayOf(data, date) || {}, out = [], n = d.notes || [];
-    if (d.text) return d.text;
-    for (var i = 0; i < n.length; i++) out.push((n[i].t ? n[i].t + ' ' : '') + n[i].text);
+    var n = dayNotes(data, date), out = [];
+    for (var i = 0; i < n.length; i++) out.push((n[i].t ? n[i].t + '  ' : '') + n[i].text);
     return out.join('\n');
   }
 
@@ -281,8 +290,21 @@ var Core = (function () {
   //   { type: 'status', list: 'tasks'|'supplements', id, date, status }   archive, restore
   //   { type: 'rename', list, id, name }
   //   { type: 'add', list, item }                                          a new task or supplement
+  //   { type: 'order', list, ids }                                         the list in this order
 
-  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename' || op.type === 'add'; }
+  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename' || op.type === 'add' || op.type === 'order'; }
+
+  // Moving an item up (dir -1) or down (1) past the next one on screen (archived ones stay where they are)
+  function moveOp(c, list, id, dir, date) {
+    var l = (c[list] || []).slice(), i = -1, j, k, ids = [];
+    for (k = 0; k < l.length; k++) if (l[k].id === id) i = k;
+    if (i < 0) return null;
+    for (j = i + dir; j >= 0 && j < l.length && statusOn(l[j], date || today()) !== 'active'; j += dir);
+    if (j < 0 || j >= l.length) return null;
+    l.splice(j, 0, l.splice(i, 1)[0]);
+    for (k = 0; k < l.length; k++) ids.push(l[k].id);
+    return { type: 'order', list: list, ids: ids };
+  }
 
   // Colors for new items: the first one no other item uses
   var COLORS = ['#ED93B1', '#9FE1CB', '#FAC775', '#85B7EB', '#F0997B', '#AFA9EC', '#C0DD97', '#F5C4B3', '#B5D4F4', '#D3D1C7',
@@ -303,6 +325,15 @@ var Core = (function () {
   }
 
   function applyConfig(c, op) {
+    var i;
+    if (op.type === 'order') {
+      var l = c[op.list] || [], byId = {}, out = [];
+      for (i = 0; i < l.length; i++) byId[l[i].id] = l[i];
+      for (i = 0; i < op.ids.length; i++) if (byId[op.ids[i]]) { out.push(byId[op.ids[i]]); delete byId[op.ids[i]]; }
+      for (i = 0; i < l.length; i++) if (byId[l[i].id]) out.push(l[i]);
+      c[op.list] = out;
+      return c;
+    }
     if (op.type === 'add') {
       c[op.list] = c[op.list] || [];
       if (!find(c[op.list], op.item.id)) c[op.list].push(op.item);
@@ -318,6 +349,39 @@ var Core = (function () {
     return c;
   }
 
+  // ---- To-dos: todo.json = { "items": [{ id, text, on, t, done }] }. on = the day it's planned for (the day it
+  // was added), t = when; done = "YYYY-MM-DD HH:MM". On screen it sits on its own day, so an open one slides
+  // left as the days pass; a done one stays until that day ends. All of them stay in the file.
+
+  function isTodoOp(op) { return /^todo(Add|Done|Edit|Del)$/.test(op.type); }
+
+  function applyTodo(j, op) {
+    j.items = j.items || [];
+    var id = op.item ? op.item.id : op.id, i, k = -1;
+    for (i = 0; i < j.items.length; i++) if (j.items[i].id === id) k = i;
+    var it = k >= 0 ? j.items[k] : null;
+    if (op.type === 'todoAdd') { if (!it) j.items.push(op.item); }
+    else if (it && op.type === 'todoDone') { if (op.done) it.done = op.done; else delete it.done; }
+    else if (it && op.type === 'todoEdit') { if (op.text) it.text = op.text; if (op.on) it.on = op.on; }
+    else if (it && op.type === 'todoDel') j.items.splice(k, 1);
+    return j;
+  }
+
+  function newTodo(text, date) {
+    var now = new Date();
+    return { type: 'todoAdd', item: { id: newId(), text: text, on: date || ymd(now), t: hhmm(now) } };
+  }
+
+  // What's on screen: the open ones and the ones done today, oldest plan first
+  function todosShown(j, now) {
+    var out = [], l = (j && j.items) || [];
+    now = now || today();
+    for (var i = 0; i < l.length; i++) if (!l[i].done || l[i].done.slice(0, 10) >= now) out.push(l[i]);
+    return out.sort(function (a, b) { var x = a.on + (a.t || ''), y = b.on + (b.t || ''); return x < y ? -1 : x > y ? 1 : 0; });
+  }
+
+  function stamp(d) { d = d || new Date(); return ymd(d) + ' ' + hhmm(d); }
+
   // ---- Files: readable JSON, days in order, short arrays and objects on one line
 
   function serialize(m) {
@@ -331,6 +395,7 @@ var Core = (function () {
   }
 
   function serializeConfig(c) { return format(c, '') + '\n'; }
+  function serializeTodo(j) { return format(j, '') + '\n'; }
 
   function format(v, ind) {
     var flat = JSON.stringify(v);
@@ -356,7 +421,9 @@ var Core = (function () {
     hhmm: hhmm, weekday: weekday, monday: monday, monthOf: monthOf, weeks: weeks, statusOn: statusOn, find: find,
     dayOf: dayOf, entryOf: entryOf, isDone: isDone, windowOf: windowOf, cell: cell, weekCount: weekCount,
     hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, isSet: isSet, apply: apply, dayText: dayText,
-    isConfigOp: isConfigOp, newItem: newItem, applyConfig: applyConfig,
+    dayNotes: dayNotes, isConfigOp: isConfigOp, newItem: newItem, moveOp: moveOp, applyConfig: applyConfig,
+    isTodoOp: isTodoOp, applyTodo: applyTodo, newTodo: newTodo, todosShown: todosShown, stamp: stamp,
+    serializeTodo: serializeTodo,
     serialize: serialize, serializeConfig: serializeConfig, toB64: toB64, fromB64: fromB64, newId: newId
   };
 })();

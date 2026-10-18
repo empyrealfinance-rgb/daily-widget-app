@@ -1,4 +1,4 @@
-// A copy of config.json and the month files on this device, written back to the repo through the
+// A copy of config.json, todo.json and the month files on this device, written back to the repo through the
 // GitHub API. Changes wait in a queue on the device until they're saved, so logging works without
 // signal. If a file changed meanwhile (the laptop, another tab), the newer file is fetched and the
 // change applied to it again.
@@ -63,7 +63,7 @@ const Store = (() => {
   async function pull() {
     const [root, data] = await Promise.all([call('GET', ''), call('GET', 'data')]);
     const wanted = [...(root || []), ...(data || [])]
-      .filter(f => f.path === 'config.json' || /^data\/\d{4}-\d{2}\.json$/.test(f.path))
+      .filter(f => f.path === 'config.json' || f.path === 'todo.json' || /^data\/\d{4}-\d{2}\.json$/.test(f.path))
       .filter(f => !files[f.path] || files[f.path].sha !== f.sha);
     await Promise.all(wanted.map(f => fetchFile(f.path)));
     return wanted.length;
@@ -95,26 +95,30 @@ const Store = (() => {
   function message(ops) {
     const kinds = { task: 'tasks', note: 'notes', supp: 'supplements', suppNote: 'notes', dayNote: 'day notes', undayNote: 'day notes',
       gymDay: 'gym', gymNote: 'gym', gymEx: 'gym', status: 'archive', rename: 'names', add: 'new items', dayText: 'day note',
-      pc: 'time', sleep: 'sleep' };
+      pc: 'time', sleep: 'sleep', order: 'order', todoAdd: 'to-dos', todoDone: 'to-dos', todoEdit: 'to-dos', todoDel: 'to-dos' };
     const what = [...new Set(ops.map(q => kinds[q.op.type] || q.op.type))].join(', ');
     const dates = [...new Set(ops.map(q => q.op.date).filter(Boolean))].sort();
     return `${settings.device}: ${what} ${dates.join(', ')}`;
   }
 
-  // config.json takes archive, restore and renames; the month files take everything else.
+  // config.json takes archive, restore, names and order; todo.json the to-dos; the month files the rest.
   const isConfig = path => path === 'config.json';
-  const applyTo = (path, json, op) => (isConfig(path) ? Core.applyConfig(json, op) : Core.apply(json, op));
+  const isTodo = path => path === 'todo.json';
+  const applyTo = (path, json, op) => (isConfig(path) ? Core.applyConfig(json, op) : isTodo(path) ? Core.applyTodo(json, op) : Core.apply(json, op));
+  const pathOf = op => (Core.isConfigOp(op) ? 'config.json' : Core.isTodoOp(op) ? 'todo.json' : `data/${Core.monthOf(op.date)}.json`);
+  const emptyOf = path => (isConfig(path) ? { tasks: [], supplements: [] } : isTodo(path) ? { items: [] } : { days: {} });
+  const textOf = (path, json) => (isConfig(path) ? Core.serializeConfig(json) : isTodo(path) ? Core.serializeTodo(json) : Core.serialize(json));
 
   // Returns true when the file had changed elsewhere (so the screen should show the merged file).
   async function save(path, ops) {
     for (let attempt = 0; ; attempt++) {
       const base = files[path];
-      const json = base ? structuredClone(base.json) : isConfig(path) ? { tasks: [], supplements: [] } : { days: {} };
+      const json = base ? structuredClone(base.json) : emptyOf(path);
       ops.forEach(q => applyTo(path, json, q.op));
       try {
         const r = await call('PUT', path, {
           message: message(ops),
-          content: Core.toB64(isConfig(path) ? Core.serializeConfig(json) : Core.serialize(json)),
+          content: Core.toB64(textOf(path, json)),
           sha: base ? base.sha : undefined,
           branch: 'main',
         });
@@ -159,7 +163,7 @@ const Store = (() => {
   }
 
   function change(op) {
-    queue.push({ path: Core.isConfigOp(op) ? 'config.json' : `data/${Core.monthOf(op.date)}.json`, op });
+    queue.push({ path: pathOf(op), op });
     write(KEY.queue, queue);
     notify('data');
     setStatus({ state: 'waiting' });
@@ -172,6 +176,11 @@ const Store = (() => {
     return views().config;
   }
 
+  // todo.json, waiting changes included
+  function todo() {
+    return views().todo;
+  }
+
   // All months as Core wants them: { "2026-10": {days: {...}}, ... }, waiting changes included.
   function data() {
     return views().data;
@@ -181,16 +190,18 @@ const Store = (() => {
     if (cachedVersion === version && cached) return cached;
     const out = {};
     const c = files['config.json'] ? structuredClone(files['config.json'].json) : { tasks: [], supplements: [] };
+    const td = files['todo.json'] ? structuredClone(files['todo.json'].json) : { items: [] };
     for (const path in files) {
       const m = path.match(/^data\/(\d{4}-\d{2})\.json$/);
       if (m) out[m[1]] = structuredClone(files[path].json);
     }
     for (const q of queue) {
       if (isConfig(q.path)) { Core.applyConfig(c, q.op); continue; }
+      if (isTodo(q.path)) { Core.applyTodo(td, q.op); continue; }
       const m = Core.monthOf(q.op.date);
       Core.apply(out[m] || (out[m] = { days: {} }), q.op);
     }
-    cached = { config: c, data: out };
+    cached = { config: c, data: out, todo: td };
     cachedVersion = version;
     return cached;
   }
@@ -211,7 +222,7 @@ const Store = (() => {
   });
 
   return {
-    LOCAL, settings, ready, sync, flush, change, config, data, setSettings,
+    LOCAL, settings, ready, sync, flush, change, config, data, todo, setSettings,
     status: () => status,
     waiting: () => queue.length,
     onChange: f => listeners.push(f),
