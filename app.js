@@ -1,15 +1,18 @@
-// One page: tasks and supplements as ledgers, weeks Monday to Sunday. A box with a note gets a small
-// dot in its corner; the note itself stays out of sight.
+// One page: to-dos, tasks and supplements as ledgers, weeks Monday to Sunday, the weeks to come to the
+// right (swipe on to plan; they all move together; the date at the top brings them back). A box with a
+// note gets a small dot in its corner; the note itself stays out of sight.
 //   click a box                                   done / not done (gym: the gym panel; supplement: taken now);
 //                                                 unticking an earlier day asks first
 //   right-click, Ctrl/Alt+click, long-press a box its note (Enter saves, Esc closes)
-//   click a date                                  that day's journal
+//   click a date                                  that day's journal; a day to come: a new to-do for it
 //   click a name                                  rename it (Enter saves), move it up or down, Archive
-//   +                                             a new task or supplement; "+ to-do" a to-do
-// To-dos are the first rows: each on the day it was planned, so an open one slides left as days pass;
-// a done one stays until midnight. Under the lists, today: the day as a line (sleep, screen time, client
-// work from the laptop's time tracker) and the journal: notes with the time they're about (right-click
-// the line for a moment of the day). The chart button: everything for a week, month or year.
+//   the empty box under the to-dos                type a new to-do in place (Enter adds it, Esc drops it)
+//   +                                             a new task or supplement
+// To-dos: each on the day it's planned for (today, or a day picked), so an open one slides left as days
+// pass; a done one is ticked and crossed out, and stays until midnight. Under the lists, today: the day as
+// a line (sleep, screen time, client work from the laptop's time tracker) and the journal: notes with the
+// time they're about (right-click the line for a moment of the day). The chart button: everything for a
+// week, month or year.
 // Drawn from Store's data with Core's rules; every change goes through Store.change().
 
 (() => {
@@ -51,10 +54,11 @@
     const active = list => (list || []).filter(t => Core.statusOn(t, now) === 'active');
     const labels = active(cfg.tasks).map(t => [t.name, Core.hint(t, data, now)])
       .concat(active(cfg.supplements).map(s => [s.name, s.dose || '']));
-    const L = shown = layout(labels), dates = Core.weeks(now, L.weeks), scroll = scrollState();
+    const todos = Core.todosShown(Store.todo(), now), L = shown = layout(labels), dates = calendar(now, L.weeks, todos);
+    const scroll = scrollState();
     const tasks = Core.rows(cfg, data, dates, now).filter(r => r.cells.some(c => c.state !== 'none' && c.state !== 'off'));
-    const supps = Core.suppRows(cfg, data, dates, now), todos = Core.todosShown(Store.todo(), now);
-    main.innerHTML = ledger('tasks', tasks, dates, L, data, todos) + (supps.length ? ledger('supps', supps, dates, L, data) : '') +
+    const supps = Core.suppRows(cfg, data, dates, now);
+    main.innerHTML = ledger('todo', todos, dates, L) + ledger('tasks', tasks, dates, L) + (supps.length ? ledger('supps', supps, dates, L) : '') +
       todayCard(data, now);
     restoreScroll(scroll);
     fade();
@@ -105,32 +109,63 @@
     return { label, cell, weeks: fit >= 2 ? Math.min(fit, 8) : 6, fadeDays };
   }
 
+  // The days on the page: the weeks that fit (a phone: six, to swipe back to), then the weeks to come, two
+  // months or to a week past the last planned to-do, to swipe on to.
+  function calendar(now, weeks, todos) {
+    let end = Core.addDays(now, 7 * 8);
+    for (const t of todos) if (t.on > end) end = Core.addDays(t.on, 7);
+    return Core.span(Core.addDays(Core.monday(now), -7 * (weeks - 1)), Core.addDays(Core.monday(end), 6));
+  }
+
   // Older days fade out toward the left edge of what's in view, the oldest faintest; it follows a
   // swipe back. Today and days to come never fade.
   let shown = null, fading = false;
+  // Open to-dos never fade (an old one is still to do). Positions are all read first, then set, so the
+  // page is laid out once per frame.
   function fade() {
     fading = false;
     if (!shown) return;
-    const now = Core.today(), L = shown;
+    const now = Core.today(), L = shown, set = [];
     const span = L.fadeDays * (L.cell + GAP) + (L.fadeDays > 7 ? WEEK_GAP : 0);
     main.querySelectorAll('.ledger').forEach(card => {
       const x0 = card.querySelector('.scroller').getBoundingClientRect().left + L.label + WEEK_GAP;
       card.querySelectorAll('.sq[data-date], .dh').forEach(el => {
+        if ((el.dataset.date || el.dataset.day) >= now || el.matches('.td.s-todo')) return;
         const t = (el.getBoundingClientRect().left - x0) / span;
-        el.style.setProperty('--fade', (el.dataset.date || el.dataset.day) >= now || t >= 1 ? 1 : Math.max(0.2, 0.2 + 0.8 * t).toFixed(2));
+        set.push([el, t >= 1 ? '1' : Math.max(0.2, 0.2 + 0.8 * t).toFixed(2)]);
       });
     });
+    for (const [el, v] of set) if (el.style.getPropertyValue('--fade') !== v) el.style.setProperty('--fade', v);
     placeTodos();
   }
 
   // A to-do's words sit just left of its box, cut with "…" when there's no room; with too little room on
-  // the left (an old one near the edge), on its right. Worked out again on every swipe, so they follow.
+  // the left (an old one near the edge), on its right; one further on than the screen shows: at the right
+  // edge, with its day. Worked out again on every swipe, so they follow.
   function placeTodos() {
-    main.querySelectorAll('.lrow.todo').forEach(row => {
+    const g = main.querySelector('.lrow.ghost');
+    if (g) {
+      const s = g.querySelector('.sq.td').getBoundingClientRect(), r = g.getBoundingClientRect();
+      const v = g.closest('.scroller').getBoundingClientRect(), x0 = v.left + (shown ? shown.label : 0) + 6;
+      const w = Math.max(0, s.left - 7 - x0);
+      g.querySelector('.tdin').style.cssText = w >= 60 ? `left:${s.left - 7 - w - r.left}px;width:${w}px` :
+        `left:${s.right + 7 - r.left}px;width:${Math.max(60, v.right - 2 - s.right - 7)}px;text-align:left`;
+    }
+    const rows = [...main.querySelectorAll('.lrow.todo:not(.ghost)')].map(row => {
       const sq = row.querySelector('.sq.td'), tx = row.querySelector('.tdt'), sc = row.closest('.scroller');
-      const s = sq.getBoundingClientRect(), r = row.getBoundingClientRect(), v = sc.getBoundingClientRect();
-      const need = Math.ceil(textWidth(tx.textContent, innerWidth < 500 ? 13.5 : 14)) + 2, gap = 7;
-      const under = s.left < v.left + (shown ? shown.label : 0) - 2;      // swiped back under the names
+      return { tx, s: sq.getBoundingClientRect(), r: row.getBoundingClientRect(), v: sc.getBoundingClientRect() };
+    });
+    rows.forEach(({ tx, s, r, v }) => {
+      const gap = 7, px = innerWidth < 500 ? 13.5 : 14, lab = shown ? shown.label : 0;
+      const later = s.left > v.right - 6;                                 // further on than the screen shows
+      tx.classList.toggle('later', later);
+      const need = Math.ceil(textWidth(tx.firstChild.textContent + (later ? tx.lastChild.textContent : ''), px)) + 2;
+      if (later) {
+        const w = Math.max(0, Math.min(need, v.right - 2 - (v.left + lab + 6)));
+        tx.style.cssText = `left:${v.right - 2 - w - r.left}px;width:${w}px`;
+        return;
+      }
+      const under = s.left < v.left + lab - 2;                            // swiped back under the names
       const left = s.left - gap - (v.left + 2), right = v.right - 2 - (s.right + gap);
       if (!under && (left >= Math.min(need, 110) || left >= right)) {
         const w = Math.min(need, left);
@@ -143,33 +178,48 @@
       }
     });
   }
-  main.addEventListener('scroll', () => { if (!fading) { fading = true; requestAnimationFrame(fade); } }, true);
+  // The ledgers move together: the one being swiped (or wheeled) leads, the others follow it.
+  let driver = null;
+  const lead = ev => { driver = ev.target.closest ? ev.target.closest('.scroller') : null; };
+  main.addEventListener('touchstart', lead, { passive: true, capture: true });
+  main.addEventListener('wheel', lead, { passive: true, capture: true });
+  main.addEventListener('pointerdown', lead, true);
+  main.addEventListener('scroll', ev => {
+    const sc = ev.target;
+    if (sc === driver) main.querySelectorAll('.ledger .scroller').forEach(o => { if (o !== sc && Math.abs(o.scrollLeft - sc.scrollLeft) > 1) o.scrollLeft = sc.scrollLeft; });
+    if (!fading) { fading = true; requestAnimationFrame(fade); }
+  }, true);
 
-  // Keep where each ledger was scrolled to; a ledger at its right end stays there (on this week).
+  // Where the ledgers open: this week at the right edge, or tomorrow when that's further (on a Sunday).
+  // A redraw keeps them where they were swiped to; the date at the top brings them back.
+  function homeLeft(sc) {
+    const now = Core.today(), sun = Core.addDays(Core.monday(now), 6), end = sun > now ? sun : Core.addDays(now, 1);
+    const dh = sc.querySelector(`.dh[data-day="${end}"]`);
+    return dh ? Math.max(0, dh.offsetLeft + dh.offsetWidth + 1 - sc.clientWidth) : sc.scrollWidth;
+  }
   function scrollState() {
-    const s = {};
-    main.querySelectorAll('.ledger').forEach(c => {
-      const sc = c.querySelector('.scroller');
-      s[c.dataset.list] = { left: sc.scrollLeft, end: sc.scrollLeft + sc.clientWidth >= sc.scrollWidth - 4 };
-    });
-    return s;
+    const sc = main.querySelector('.ledger .scroller');
+    return sc ? { left: sc.scrollLeft, home: Math.abs(sc.scrollLeft - homeLeft(sc)) < 4 } : null;
   }
   function restoreScroll(s) {
-    main.querySelectorAll('.ledger').forEach(c => {
-      const sc = c.querySelector('.scroller'), k = s[c.dataset.list];
-      sc.scrollLeft = !k || k.end ? sc.scrollWidth : k.left;
-    });
+    main.querySelectorAll('.ledger .scroller').forEach(sc => { sc.scrollLeft = !s || s.home ? homeLeft(sc) : s.left; });
   }
+  $('#title').addEventListener('click', () => {
+    driver = null;
+    main.querySelectorAll('.ledger .scroller').forEach(sc => sc.scrollTo({ left: homeLeft(sc), behavior: 'smooth' }));
+  });
 
-  function ledger(list, rows, dates, L, data, todos) {
+  // One card: to-dos, tasks or supplements. Weekday letters and dates over the columns (a month's name on
+  // its 1st), the rows, and + to add.
+  function ledger(list, rows, dates, L) {
     const now = Core.today(), weeks = [];
     for (let i = 0; i < dates.length; i += 7) weeks.push(dates.slice(i, i + 7));
-    const head = `<div class="lrow head"><div class="lab">${list === 'supps' ? '<span class="title">supplements</span>' :
-      '<button class="addtd" data-addtodo="1">+ to-do</button>'}</div>` +
+    const head = `<div class="lrow head"><div class="lab"><span class="title">${{ todo: 'to-do', tasks: 'tasks', supps: 'supplements' }[list]}</span></div>` +
       weeks.map(w => `<div class="wk">${w.map((d, i) => {
-        return `<button class="dh${d === now ? ' today' : ''}" data-day="${d}" title="${pretty(d)}"><span>${'MTWTFSS'[i]}</span>${+d.slice(8)}</button>`;
+        const n = +d.slice(8), lbl = n === 1 ? MONTHS[+d.slice(5, 7) - 1] : n;
+        return `<button class="dh${d === now ? ' today' : ''}${n === 1 ? ' m1' : ''}" data-day="${d}" title="${pretty(d)}"><span>${'MTWTFSS'[i]}</span>${lbl}</button>`;
       }).join('')}</div>`).join('') + '</div>';
-    const body = rows.map(r => {
+    const body = list === 'todo' ? todoRows(rows, weeks, dates) : rows.map(r => {
       const c = colorOf(r);
       return `<div class="lrow"><div class="lab"><button class="name" data-info="${r.id}" data-list="${list}">` +
         (prefs.colors && r.color ? `<i style="background:${c}"></i>` : '') +
@@ -177,21 +227,51 @@
         weeks.map((w, wi) => `<div class="wk">${w.map((d, di) => box(r, r.cells[wi * 7 + di], list, c)).join('')}</div>`).join('') +
         '</div>';
     }).join('');
-    // to-dos: one box, on the day planned (older than the page: on its first day, the date in front)
-    const first = dates[0];
-    const td = (todos || []).map(t => {
+    // today's column: a warm band behind it, fading out at its ends
+    const ti = dates.indexOf(now), tx = L.label + WEEK_GAP + Math.floor(ti / 7) * (7 * L.cell + 6 * GAP + WEEK_GAP) + (ti % 7) * (L.cell + GAP);
+    const band = ti < 0 ? '' : `<i class="tcol" style="left:${tx - 3}px;width:${L.cell + 6}px"></i>`;
+    return `<section class="card ledger" data-list="${list}" ` +
+      `style="--cell:${L.cell}px;--label:${L.label}px;--gap:${GAP}px;--wgap:${WEEK_GAP}px">` +
+      `<div class="scroller">${band}${head}${body}</div>` +
+      (list === 'todo' ? '' : `<button class="addb" data-add="${list}" aria-label="Add">+</button>`) + '</section>';
+  }
+
+  // To-dos: one box, on the day planned (older than the page: on its first day, the date in front); done:
+  // ticked, the words crossed out. Then the empty box: a new one, typed in place.
+  function todoRows(todos, weeks, dates) {
+    const first = dates[0], now = Core.today(), on = ghostOn && ghostOn >= now ? ghostOn : now;
+    const ghost = `<div class="lrow todo ghost"><div class="lab"></div>${weeks.map(w => `<div class="wk">${w.map(d => d === on ?
+      `<button class="sq td s-new" data-newtodo="${d}" data-date="${d}" aria-label="New to-do"></button>` : '<span class="sq"></span>').join('')}</div>`).join('')}` +
+      `<input class="tdt tdin" data-on="${on}" aria-label="New to-do" autocomplete="off" enterkeyhint="done"></div>`;
+    return todos.map(t => {
       const col = t.on < first ? first : t.on;
       const cells = weeks.map(w => `<div class="wk">${w.map(d => d === col ?
         `<button class="sq td ${t.done ? 's-tdone' : 's-todo'}" data-todo="${t.id}" data-date="${d}" aria-label="${esc(t.text)}"></button>` :
         '<span class="sq"></span>').join('')}</div>`).join('');
-      return `<div class="lrow todo"><div class="lab"></div>${cells}` +
-        `<button class="tdt${t.done ? ' done' : ''}" data-todo="${t.id}">${esc((t.on < first ? `‹ ${pretty(t.on)} · ` : '') + t.text)}</button></div>`;
-    }).join('');
-    return `<section class="card ledger" data-list="${list}" ` +
-      `style="--cell:${L.cell}px;--label:${L.label}px;--gap:${GAP}px;--wgap:${WEEK_GAP}px">` +
-      `<div class="scroller">${head}${td}${td && body ? '<div class="lsep"></div>' : ''}${body}</div>` +
-      `<button class="addb" data-add="${list}" aria-label="Add">+</button></section>`;
+      return `<div class="lrow todo"><div class="lab"></div>${cells}<button class="tdt${t.done ? ' done' : ''}" data-todo="${t.id}">` +
+        `<span class="w">${esc((t.on < first ? `‹ ${pretty(t.on)} · ` : '') + t.text)}</span><span class="when"> · ${pretty(t.on)} ›</span></button></div>`;
+    }).join('') + ghost;
   }
+
+  // The empty box: tap it (or the date of a day to come, which moves it there) and type. The words show
+  // where they'll stay, left of the box; Enter (or leaving the field) adds it, Esc drops it.
+  let ghostOn = null;
+  function startTodo(date) {
+    if (date && date !== ghostOn) { ghostOn = date; render(); }
+    const f = main.querySelector('.tdin');
+    if (f) f.focus();
+  }
+  function addTyped(f) {
+    const text = f.value.trim(), on = f.dataset.on;
+    f.value = '';
+    f.closest('.lrow').classList.remove('on');
+    if (ghostOn) { ghostOn = null; deferred = true; }
+    quiet = true;
+    if (text) Store.change(Core.newTodo(text, on));
+    quiet = false;
+    setTimeout(() => { if (deferred && !typing() && pop.hidden) render(); }, 300);
+  }
+  main.addEventListener('focusin', ev => { if (ev.target.matches('.tdin')) ev.target.closest('.lrow').classList.add('on'); });
 
   function box(r, c, list, color) {
     if (c.state === 'none' || c.state === 'off') return '<span class="sq"></span>';
@@ -276,9 +356,17 @@
     setTimeout(() => { if (deferred && !typing() && pop.hidden) render(); }, 300);
   }
   main.addEventListener('input', ev => { if (ev.target.matches('.dtext')) grow(ev.target); });
-  main.addEventListener('focusout', ev => { if (ev.target.matches('.dtext')) saveDayText(ev.target); });
+  main.addEventListener('focusout', ev => {
+    if (ev.target.matches('.dtext')) saveDayText(ev.target);
+    if (ev.target.matches('.tdin')) addTyped(ev.target);
+  });
   main.addEventListener('keydown', ev => {
     if (ev.target.matches('.dtext') && ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); ev.target.blur(); }
+    if (ev.target.matches('.tdin') && (ev.key === 'Enter' || ev.key === 'Escape')) {
+      ev.preventDefault();
+      if (ev.key === 'Escape') ev.target.value = '';
+      ev.target.blur();
+    }
   });
 
   // ---- Taps
@@ -355,7 +443,8 @@
     });
   }
 
-  // A date: that day's journal, and a line to add (no time: written afterwards)
+  // A date: that day's journal, and a line to add (no time: written afterwards); a day to come: a to-do for it
+  const datePop = el => (el.dataset.day > Core.today() ? startTodo(el.dataset.day) : dayPop(el));
   function dayPop(el) {
     const date = el.dataset.day, notes = Core.dayNotes(Store.data(), date);
     openPop(el, `<div class="ph">${pretty(date)}</div>` +
@@ -408,13 +497,15 @@
   function todoPop(el) {
     const t = (Store.todo().items || []).find(x => x.id === el.dataset.todo);
     if (!t) return;
-    openPop(el, `<div class="ph">to-do · ${pretty(t.on)}${t.done ? ' · done ' + t.done.slice(11) : ''}</div>` +
-      `<input class="nm" value="${esc(t.text)}" aria-label="To-do" autocomplete="off">` +
+    openPop(el, `<div class="ph">to-do${t.done ? ' · done ' + pretty(t.done.slice(0, 10)) + ' ' + t.done.slice(11) : ''}</div>` +
+      `<input class="nm" value="${esc(t.text)}" aria-label="To-do" autocomplete="off">${dayChips(t.on)}` +
       `<div class="row end"><button class="btn small" data-pop="del">Delete</button>` +
       `<button class="btn small" data-pop="toggle">${t.done ? 'Not done' : 'Done'}</button></div>`, {
       save: () => {
-        const text = pop.querySelector('input').value.trim();
-        if (text && text !== t.text) Store.change({ type: 'todoEdit', id: t.id, text });
+        const text = pop.querySelector('.nm').value.trim(), on = pickedDay(t.on), op = { type: 'todoEdit', id: t.id };
+        if (text && text !== t.text) op.text = text;
+        if (on !== t.on) op.on = on;
+        if (op.text || op.on) Store.change(op);
       },
       toggle: () => { closePop(true); Store.change({ type: 'todoDone', id: t.id, done: t.done ? null : Core.stamp() }); },
       del: b => {
@@ -422,15 +513,24 @@
         Store.change({ type: 'todoDel', id: t.id });
         closePop(false);
       },
+      day: pickDay,
     });
   }
-  // A new to-do for today: Enter adds it and leaves the field ready for the next one
-  function todoAddPop(el) {
-    const add = () => {
-      const f = pop.querySelector('input'), text = f.value.trim();
-      if (text) { Store.change(Core.newTodo(text)); f.value = ''; }
-    };
-    openPop(el, '<div class="ph">to-do</div><input class="nm" aria-label="To-do" autocomplete="off">', { save: add, enter: add });
+  // The day chips: today, tomorrow, the rest of the coming week, and a date field for any day
+  function dayChips(sel) {
+    const now = Core.today();
+    let out = '<div class="chips">';
+    for (let i = 0; i < 7; i++) {
+      const d = Core.addDays(now, i);
+      out += `<button class="chip${d === sel ? ' on' : ''}" data-pop="day" data-day="${d}">${i === 0 ? 'today' : i === 1 ? 'tomorrow' : WD[Core.weekday(d)]}</button>`;
+    }
+    return out + `<input type="date" class="dpick" value="${sel}" aria-label="Day"></div>`;
+  }
+  const pickedDay = def => (pop.querySelector('.dpick') || {}).value || def;
+  function pickDay(b) {
+    pop.querySelector('.dpick').value = b.dataset.day;
+    pop.querySelectorAll('.chip[data-day]').forEach(x => x.classList.toggle('on', x === b));
+    pop.querySelector('.nm').focus();
   }
 
   // A new task (daily, on a weekday, or on a weekday every other week) or supplement (with its dose).
@@ -500,6 +600,9 @@
     if (b && popActs && popActs[b.dataset.pop]) popActs[b.dataset.pop](b);
   });
   pop.addEventListener('input', ev => { if (ev.target.tagName === 'TEXTAREA') grow(ev.target); });
+  pop.addEventListener('change', ev => {
+    if (ev.target.matches('.dpick')) pop.querySelectorAll('.chip[data-day]').forEach(x => x.classList.toggle('on', x.dataset.day === ev.target.value));
+  });
   pop.addEventListener('keydown', ev => {
     if (ev.key === 'Escape') { ev.preventDefault(); closePop(false); }
     else if (ev.key === 'Enter' && !ev.shiftKey && /^(TEXTAREA|INPUT)$/.test(ev.target.tagName)) {
@@ -517,7 +620,7 @@
   let press = null;
   main.addEventListener('pointerdown', ev => {
     const el = ev.target.closest('.sq[data-id], .dh, .name, [data-todo], .dline');
-    if (!el || ev.pointerType === 'mouse') return;
+    if (!el || ev.pointerType === 'mouse' || (el.matches('.dh') && el.dataset.day > Core.today())) return;
     press = { el, x: ev.clientX, y: ev.clientY, long: false };
     press.timer = setTimeout(() => { press.long = true; longPress(el, press.x); }, 450);
   });
@@ -529,7 +632,7 @@
   function longPress(el, x) {
     if (el.dataset.todo) todoPop(el);
     else if (el.matches('.dline')) momentPop(el, x);
-    else if (el.matches('.sq')) notePop(el); else if (el.matches('.dh')) dayPop(el); else namePop(el);
+    else if (el.matches('.sq')) notePop(el); else if (el.matches('.dh')) datePop(el); else namePop(el);
   }
 
   main.addEventListener('contextmenu', ev => {
@@ -549,10 +652,10 @@
     press = null;
     const ds = el.dataset;
     if (ds.todo) return el.matches('.sq') && !(ev.ctrlKey || ev.altKey || ev.metaKey) ? todoTap(el) : todoPop(el);
-    if (ds.addtodo) return todoAddPop(el);
+    if (ds.newtodo) return startTodo(ds.newtodo);
     if (ds.note) return journalPop(el, ds.ndate, ds.note);
     if (ds.id && ds.date) return ev.ctrlKey || ev.altKey || ev.metaKey ? notePop(el) : tap(el);
-    if (ds.day) return dayPop(el);
+    if (ds.day) return datePop(el);
     if (ds.info) return namePop(el);
     if (ds.add) return addPop(el);
     if (ds.act === 'settings') return openSettings();

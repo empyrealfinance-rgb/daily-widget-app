@@ -27,6 +27,13 @@ var Core = (function () {
     return out;
   }
 
+  // The dates from a to b, both included
+  function span(a, b) {
+    var out = [];
+    for (var d = a; d <= b; d = addDays(d, 1)) out.push(d);
+    return out;
+  }
+
   // ---- Lifecycle: item.status = [["2026-10-17", "active"], ["2026-12-01", "archived"], ...]
   // Before the first date it didn't exist yet. Only active items are on screen; the data stays.
 
@@ -350,8 +357,9 @@ var Core = (function () {
   }
 
   // ---- To-dos: todo.json = { "items": [{ id, text, on, t, done }] }. on = the day it's planned for (the day it
-  // was added), t = when; done = "YYYY-MM-DD HH:MM". On screen it sits on its own day, so an open one slides
-  // left as the days pass; a done one stays until that day ends. All of them stay in the file.
+  // was added, or one picked: tomorrow, a day to come), t = when it was written; done = "YYYY-MM-DD HH:MM". On
+  // screen it sits on its own day, so an open one slides left as the days pass; a done one stays until that day
+  // ends. All of them stay in the file.
 
   function isTodoOp(op) { return /^todo(Add|Done|Edit|Del)$/.test(op.type); }
 
@@ -418,7 +426,7 @@ var Core = (function () {
 
   return {
     WEEKDAYS: WEEKDAYS, pad: pad, ymd: ymd, parse: parse, addDays: addDays, diffDays: diffDays, today: today,
-    hhmm: hhmm, weekday: weekday, monday: monday, monthOf: monthOf, weeks: weeks, statusOn: statusOn, find: find,
+    hhmm: hhmm, weekday: weekday, monday: monday, monthOf: monthOf, weeks: weeks, span: span, statusOn: statusOn, find: find,
     dayOf: dayOf, entryOf: entryOf, isDone: isDone, windowOf: windowOf, cell: cell, weekCount: weekCount,
     hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, isSet: isSet, apply: apply, dayText: dayText,
     dayNotes: dayNotes, isConfigOp: isConfigOp, newItem: newItem, moveOp: moveOp, applyConfig: applyConfig,

@@ -46,7 +46,7 @@ header {
   padding: calc(env(safe-area-inset-top) + 8px) 16px 8px;
   max-width: 1200px; margin: 0 auto;
 }
-header #title { flex: 1; color: var(--muted); font-size: 14px; }
+header #title { flex: 1; color: var(--muted); font-size: 14px; cursor: pointer; }   /* brings the ledgers back to this week */
 #status { background: none; border: 0; color: var(--faint); font-size: 13px; padding: 4px 0; }
 #status.problem { color: var(--danger); }
 #gear { background: none; border: 0; color: var(--faint); font-size: 18px; padding: 2px 4px; }
@@ -85,7 +85,12 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
   text-align: center; font-size: 11px; color: var(--faint); line-height: 1.15;
 }
 .dh span { display: block; font-size: 10px; }
-.dh.today { color: var(--text); }
+.dh.today { color: #f0b463; }
+.tcol {
+  position: absolute; top: 0; bottom: 0; border-radius: 8px; pointer-events: none;
+  background: linear-gradient(to bottom, rgba(240, 168, 72, 0), rgba(240, 168, 72, .2) 22%, rgba(240, 168, 72, .13) 70%, rgba(240, 168, 72, 0));
+}
+.dh.m1 { color: var(--muted); }
 
 .sq {
   position: relative; display: block; flex: none; width: var(--cell); height: var(--cell);
@@ -94,7 +99,7 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 }
 .sq.s-done { background: var(--c); }
 .sq.s-flag { background: var(--c); opacity: calc(.6 * var(--fade, 1)); }
-.sq.s-todo { background: var(--todo); box-shadow: inset 0 0 0 1.5px #4d5159; }
+.sq.s-todo { background: var(--todo); box-shadow: inset 0 0 0 1.5px #8a8f99; }
 .sq.s-open { background: var(--open); }
 .sq.s-future { box-shadow: inset 0 0 0 1px #25272c; }
 .sq.s-missed { background: var(--missed); }
@@ -114,12 +119,11 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
   .name { font-size: 13.5px; }
 }
 
-/* to-dos: the first rows, one box on the day planned, the words beside it */
-.addtd { background: none; border: 0; padding: 0; color: var(--muted); font-size: 12px; text-align: left; }
-@media (hover: hover) { .addtd:hover { color: var(--text); } }
+/* to-dos: a card of their own, one box on the day planned, the words beside it; done: ticked, crossed out */
 .lrow.todo { position: relative; }
-.lsep { height: 8px; }
-.sq.s-tdone { background: #8b909a; }
+.sq.s-tdone {
+  background: #8b909a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.2 8.3l2.6 2.6 5-5.6' fill='none' stroke='%2317181b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% no-repeat;
+}
 .tdt {
   position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; height: 22px; line-height: 22px;
   background: none; border: 0; padding: 0; color: var(--text); font-size: 14px; text-align: right;
@@ -127,7 +131,18 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 }
 .tdt.r { text-align: left; }
 .tdt.done { color: var(--faint); text-decoration: line-through; }
-@media (max-width: 499px) { .tdt { font-size: 13.5px; } }
+.tdt .when { display: none; }
+.sq.s-new { box-shadow: inset 0 0 0 1px #3d4047; }
+.ghost.on .sq.s-new { background: var(--todo); box-shadow: inset 0 0 0 1.5px #8a8f99; }
+#main .tdin {
+  width: 0; height: 22px; padding: 0; border: 0; border-radius: 0; background: none; color: var(--text);
+  font-size: 14px; text-align: right; caret-color: #f0b463; overflow: hidden; text-overflow: clip;
+}
+#main .tdin:focus { outline: none; }
+.tdt.later { display: flex; justify-content: flex-end; }
+.tdt.later .w { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tdt.later .when { display: inline; flex: none; white-space: pre; color: var(--muted); }
+@media (max-width: 499px) { .tdt, #main .tdin { font-size: 13.5px; } }
 
 .addb { display: block; background: none; border: 0; padding: 2px 2px 0; color: var(--faint); font-size: 18px; line-height: 1; }
 @media (hover: hover) { .addb:hover { color: var(--text); } }
@@ -188,6 +203,7 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .chips[hidden] { display: none; }
 .chip { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 13px; color: var(--muted); }
 .chip.on { color: var(--text); border-color: #4a4e56; background: var(--surface); }
+.chips .dpick { width: auto; padding: 2px 10px; border-radius: 999px; font-size: 16px; line-height: 1.3; color: var(--muted); background: none; }
 .ph i { width: 3px; height: 13px; border-radius: 2px; flex: none; }
 
 /* ---- shared bits */
