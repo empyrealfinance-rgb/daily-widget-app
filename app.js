@@ -142,8 +142,7 @@
     for (let i = 0; i < dates.length; i += 7) weeks.push(dates.slice(i, i + 7));
     const head = `<div class="lrow head"><div class="lab">${list === 'supps' ? '<span class="title">supplements</span>' : ''}</div>` +
       weeks.map(w => `<div class="wk">${w.map((d, i) => {
-        const noted = !!Core.dayText(data, d);
-        return `<button class="dh${d === now ? ' today' : ''}${noted ? ' noted' : ''}" data-day="${d}" title="${pretty(d)}"><span>${'MTWTFSS'[i]}</span>${+d.slice(8)}</button>`;
+        return `<button class="dh${d === now ? ' today' : ''}" data-day="${d}" title="${pretty(d)}"><span>${'MTWTFSS'[i]}</span>${+d.slice(8)}</button>`;
       }).join('')}</div>`).join('') + '</div>';
     const body = rows.map(r => {
       const c = colorOf(r);
@@ -210,13 +209,22 @@
     return `<section class="card today"><div class="th"><span class="title">today</span><span class="sums">${sums}</span></div>` +
       `<div class="dline">${line}</div>` +
       `<div class="marks">${mark(woke, sl.woke != null)}${mark(Math.min(slept, 1439), sl.slept != null)}</div>` +
-      `<div class="hours"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>` +
-      `<textarea class="dtext" rows="1" data-date="${date}" aria-label="Today's note">${esc(Core.dayText(data, date))}</textarea></section>`;
+      `<div class="hours">${hours()}</div>` +
+      `<label class="jl" for="dtext">journal</label>` +
+      `<textarea class="dtext" id="dtext" rows="2" data-date="${date}">${esc(Core.dayText(data, date))}</textarea></section>`;
   }
 
   // Saved when it loses focus. The page redraws a moment later, so a click that took the focus (a box)
   // still lands.
   let quiet = false;
+  // Every hour under the line (every other one on a phone)
+  function hours() {
+    const step = innerWidth < 500 ? 2 : 1;
+    let out = '';
+    for (let h = 0; h <= 24; h += step) out += `<span style="left:${(h / 24 * 100).toFixed(3)}%">${h}</span>`;
+    return out;
+  }
+
   function saveDayText(ta) {
     const text = ta.value.trim(), date = ta.dataset.date;
     if (text === Core.dayText(Store.data(), date)) return;
@@ -315,11 +323,12 @@
     });
   }
 
-  // A new task (daily, optional or on one weekday) or supplement (with its dose). Enter adds it.
+  // A new task (daily, on a weekday, or on a weekday every other week) or supplement (with its dose).
+  // Enter adds it.
   function addPop(el) {
     const list = el.dataset.add, wd = Core.WEEKDAYS[Core.weekday(Core.today())];
     const chips = list === 'supps' ? '<input class="dose" aria-label="Dose" autocomplete="off">' :
-      '<div class="chips">' + [['daily', 'daily'], ['optional', 'optional'], ['weekly', 'weekly']]
+      '<div class="chips">' + [['daily', 'daily'], ['weekly', 'weekly'], ['weeks2', 'every 2 weeks']]
         .map(([k, t], i) => `<button class="chip${i ? '' : ' on'}" data-pop="kind" data-kind="${k}">${t}</button>`).join('') + '</div>' +
       '<div class="chips days" hidden>' + ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
         .map(d => `<button class="chip${d === wd ? ' on' : ''}" data-pop="day" data-day="${d}">${d}</button>`).join('') + '</div>';
@@ -331,11 +340,15 @@
         const cfg = Store.config();
         if (list === 'supps') return Store.change(Core.newItem(cfg, 'supplements', name, { dose: pop.querySelector('.dose').value.trim() }));
         const kind = pop.querySelector('.chips .on').dataset.kind, day = pop.querySelector('.days .on').dataset.day;
-        Store.change(Core.newItem(cfg, 'tasks', name, kind === 'weekly' ? { kind: 'weekly', day } : kind === 'optional' ? { kind: 'daily', must: false } : { kind: 'daily' }));
+        // every other week starts on the next such day (a week from today if it's today)
+        let first = Core.addDays(Core.today(), 1);
+        while (Core.WEEKDAYS[Core.weekday(first)] !== day) first = Core.addDays(first, 1);
+        Store.change(Core.newItem(cfg, 'tasks', name, kind === 'weekly' ? { kind: 'weekly', day } :
+          kind === 'weeks2' ? { kind: 'weekly', day, weeks: 2, from: first } : { kind: 'daily' }));
       },
       kind: b => {
         pop.querySelectorAll('[data-kind]').forEach(x => x.classList.toggle('on', x === b));
-        pop.querySelector('.days').hidden = b.dataset.kind !== 'weekly';
+        pop.querySelector('.days').hidden = b.dataset.kind === 'daily';
         pop.querySelector('.nm').focus();
       },
       day: b => { pop.querySelectorAll('[data-day]').forEach(x => x.classList.toggle('on', x === b)); pop.querySelector('.nm').focus(); },

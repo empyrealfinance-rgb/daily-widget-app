@@ -59,7 +59,6 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .ledger .scroller::-webkit-scrollbar { display: none; }
 .lrow { display: flex; align-items: center; gap: var(--wgap); width: max-content; padding: 3px 0; }
 .lrow.head { padding-bottom: 6px; }
-.lrow.head .lab { margin-bottom: -9px; padding-bottom: 9px; }   /* covers the note dots under the dates passing beneath */
 .lab {
   position: sticky; left: 0; z-index: 1; width: var(--label); flex: none; align-self: stretch; margin: -3px 0; padding-top: 3px; padding-bottom: 3px;
   display: flex; flex-direction: column; justify-content: center; background: var(--surface); padding-right: 6px; min-width: 0;
@@ -84,10 +83,6 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 }
 .dh span { display: block; font-size: 10px; }
 .dh.today { color: var(--text); }
-.dh.noted::after {
-  content: ''; position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px; margin-left: -2px;
-  border-radius: 50%; background: var(--accent);
-}
 
 .sq {
   position: relative; display: block; flex: none; width: var(--cell); height: var(--cell);
@@ -123,7 +118,10 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .today .th { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .today .sums { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
 .cdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
-.dline { position: relative; height: 16px; background: #1b1c20; border-radius: 4px; }
+.dline {
+  position: relative; height: 16px; border-radius: 4px;
+  background: repeating-linear-gradient(to right, transparent 0 calc(100% / 24 - 1px), #26282d calc(100% / 24 - 1px) calc(100% / 24)), #1b1c20;
+}
 .dline i { position: absolute; display: block; }
 .dline .awake { top: 0; bottom: 0; background: #23252a; border-radius: 4px; }
 .dline .sl { top: 9px; height: 5px; background: #4b4a86; border-radius: 3px; }
@@ -136,12 +134,16 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .mk b { font-weight: 400; }
 .mk.real { color: var(--muted); }
 .mk.real::before { border-left-style: solid; border-color: #6a6d75; }
-.hours { display: flex; justify-content: space-between; height: auto; margin-top: -2px; color: #3d4046; }
+.hours { margin-top: -2px; color: #4a4d54; }
+.hours span { position: absolute; transform: translateX(-50%); }
+.hours span:first-child { transform: none; }
+.hours span:last-child { transform: translateX(-100%); }
+.jl { display: block; margin: 14px 0 5px; font-size: 12px; color: var(--muted); }
 .dtext {
-  display: block; resize: none; overflow: hidden; margin-top: 10px; min-height: 44px; line-height: 1.5;
-  background: #141518; border: 1px solid transparent; border-radius: 10px; font-size: 15px;
+  display: block; resize: none; overflow: hidden; min-height: 64px; line-height: 1.5;
+  background: #1e2024; border: 1px solid #34373d; border-radius: 10px; font-size: 15px;
 }
-.dtext:focus { border-color: #3a3d43; }
+.dtext:focus { border-color: #5a5e66; background: #202226; }
 
 /* ---- the popover (a box's note, a day's notes, a name, unticking an earlier day) */
 #pop {

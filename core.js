@@ -57,8 +57,12 @@ var Core = (function () {
   }
 
   // The due window holding date, as [first, last] day, or null when the task isn't due that day.
+  // weekly: on its day; with weeks: 2 (and from: its first date) every other week
   function windowOf(task, date) {
-    if (task.kind === 'weekly') return WEEKDAYS[weekday(date)] === task.day ? [date, date] : null;
+    if (task.kind === 'weekly') {
+      var every = task.weeks > 1 && task.from ? 7 * task.weeks : 0;
+      return WEEKDAYS[weekday(date)] === task.day && (!every || diffDays(task.from, date) % every === 0) ? [date, date] : null;
+    }
     if (task.kind === 'every') {
       var start = addDays(task.from, Math.floor(diffDays(task.from, date) / task.days) * task.days);
       return [start, addDays(start, task.days - 1)];
@@ -118,10 +122,15 @@ var Core = (function () {
     return n;
   }
 
-  // A few words beside the name: "2/3" (gym this week), "5 days left" (fast, month end).
+  // A few words beside the name: "2/3" (gym this week), "5 days left" (fast, month end), "in 7 days"
+  // (every other week, till the next one).
   function hint(task, data, now) {
     now = now || today();
     if (task.kind === 'gym') return weekCount(task, data, now) + '/' + task.perWeek;
+    if (task.kind === 'weekly' && task.weeks > 1 && task.from) {
+      var every = 7 * task.weeks, k = diffDays(task.from, now), n = k < 0 ? -k : (every - k % every) % every;
+      return n === 0 ? '' : n === 1 ? 'tomorrow' : 'in ' + n + ' days';
+    }
     if (task.kind === 'every' || task.kind === 'monthEnd') {
       var w = windowOf(task, now);
       if (!w) return '';
