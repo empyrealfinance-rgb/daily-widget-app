@@ -99,6 +99,7 @@ var Core = (function () {
   //   todo    today, still open
   //   missed  grey with a small dot
   //   open    possible that day, nothing to show (faint square, tappable)
+  //   rest    gym after restAfter gym days in a row: a rest day, nothing to tick (done anyway: flag)
   //   future  a day still to come
   //   none    not due that day (no square)
   //   off     paused / archived then
@@ -110,6 +111,7 @@ var Core = (function () {
     var w = windowOf(task, date);
     if (!w) return 'none';
     var done = isDone(task, data, date);
+    if (task.kind === 'gym' && mustRest(task, data, date)) return done ? 'flag' : 'rest';
     if (date > now) return done ? 'done' : 'future';
     if (task.kind === 'record') return !done ? 'open' : date < now && broken(task, data, date, config) ? 'flag' : 'done';
     if (done) return 'done';
@@ -121,6 +123,14 @@ var Core = (function () {
       return date === w[1] ? 'missed' : 'open';
     }
     return date === now ? 'todo' : 'missed';
+  }
+
+  // gym with restAfter: n: the day after n gym days in a row is a rest day
+  function mustRest(task, data, date) {
+    var n = task.restAfter || 0;
+    if (!n) return false;
+    for (var i = 1; i <= n; i++) if (!isDone(task, data, addDays(date, -i))) return false;
+    return true;
   }
 
   function weekCount(task, data, date) {

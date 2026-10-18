@@ -284,6 +284,7 @@
 
   function box(r, c, list, color) {
     if (c.state === 'none' || c.state === 'off') return '<span class="sq"></span>';
+    if (c.state === 'rest') return `<span class="sq s-rest" data-date="${c.date}" title="rest day"></span>`;
     return `<button class="sq s-${c.state}${c.note ? ' noted' : ''}" style="--c:${color}" data-id="${r.id}" data-list="${list}" ` +
       `data-date="${c.date}"></button>`;
   }

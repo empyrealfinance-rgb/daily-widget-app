@@ -103,6 +103,10 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .sq.s-open { background: var(--open); }
 .sq.s-future { box-shadow: inset 0 0 0 1px #25272c; }
 .sq.s-missed { background: var(--missed); }
+.sq.s-rest::before {      /* a rest day (gym after two in a row): a short line, nothing to tick */
+  content: ''; position: absolute; left: 30%; right: 30%; top: 50%; height: 2px; margin-top: -1px;
+  border-radius: 1px; background: #4a4d54;
+}
 .sq.s-missed::before, .sq.s-flag::before {
   content: ''; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px;
   border-radius: 50%; background: var(--dot);
@@ -131,7 +135,7 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 }
 .tdt.r { text-align: left; }
 .tdt.done { color: var(--faint); text-decoration: line-through; }
-.sq.s-new { box-shadow: inset 0 0 0 1px #3d4047; }
+.sq.s-new { box-shadow: inset 0 0 0 1.5px #62666f; }
 .ghost.on .sq.s-new { background: var(--todo); box-shadow: inset 0 0 0 1.5px #8a8f99; }
 #main .tdin {
   width: 0; height: 22px; padding: 0; border: 0; border-radius: 0; background: none; color: var(--text);
@@ -258,6 +262,7 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .as.s-open { background: var(--open); }
 .as.s-todo { box-shadow: inset 0 0 0 1px #4d5159; }
 .as.s-future { box-shadow: inset 0 0 0 1px #222428; }
+.as.s-rest { background: #1b1c20; }
 .aline { display: flex; gap: 10px; font-size: 14px; padding: 4px 0; border-top: 1px solid var(--line); }
 .aline .jt { min-width: 92px; }
 @media (min-width: 700px) {
