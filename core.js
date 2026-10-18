@@ -203,6 +203,16 @@ var Core = (function () {
       d.supps = d.supps || {};
       t = d.supps[op.id] || (d.supps[op.id] = {});
       if (op.text) t.note = op.text; else delete t.note;
+    } else if (op.type === 'dayText') {
+      // The day's note: what it went into, how it went (one text per day). Older days had a list of
+      // timed notes; writing the text takes those in.
+      if (op.text) d.text = op.text; else delete d.text;
+      delete d.notes;
+    } else if (op.type === 'pc') {
+      // The laptop's time tracker for that day (desk widget): screen time and client work
+      if (op.pc) d.pc = op.pc; else delete d.pc;
+    } else if (op.type === 'sleep') {
+      if (op.sleep) d.sleep = op.sleep; else delete d.sleep;
     } else if (op.type === 'dayNote') {
       // How the day went: a list of notes with the time, like a tiny diary
       d.notes = d.notes || [];
@@ -250,13 +260,45 @@ var Core = (function () {
   // doesn't wipe a past day).
   function isSet(state) { return state === 'done' || state === 'flag'; }
 
+  // The day's note as text (older days: their timed notes, one per line)
+  function dayText(data, date) {
+    var d = dayOf(data, date) || {}, out = [], n = d.notes || [];
+    if (d.text) return d.text;
+    for (var i = 0; i < n.length; i++) out.push((n[i].t ? n[i].t + ' ' : '') + n[i].text);
+    return out.join('\n');
+  }
+
   // ---- Changes to config.json:
   //   { type: 'status', list: 'tasks'|'supplements', id, date, status }   archive, restore
   //   { type: 'rename', list, id, name }
+  //   { type: 'add', list, item }                                          a new task or supplement
 
-  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename'; }
+  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename' || op.type === 'add'; }
+
+  // Colors for new items: the first one no other item uses
+  var COLORS = ['#ED93B1', '#9FE1CB', '#FAC775', '#85B7EB', '#F0997B', '#AFA9EC', '#C0DD97', '#F5C4B3', '#B5D4F4', '#D3D1C7',
+    '#5DCAA5', '#EFC26B', '#97C459', '#C9A37A'];
+
+  // A new item: id from the name (or random for emoji-only names), its own color, active from today
+  function newItem(c, list, name, extra) {
+    var all = (c.tasks || []).concat(c.supplements || []), used = {}, ids = {}, i, k;
+    for (i = 0; i < all.length; i++) { used[(all[i].color || '').toUpperCase()] = 1; ids[all[i].id] = 1; }
+    var base = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || newId(), id = base;
+    for (i = 2; ids[id]; i++) id = base + '_' + i;
+    var item = { id: id, name: name }, color = COLORS[0];
+    for (i = 0; i < COLORS.length; i++) if (!used[COLORS[i]]) { color = COLORS[i]; break; }
+    for (k in extra) if (extra.hasOwnProperty(k)) item[k] = extra[k];
+    item.color = color;
+    item.status = [[today(), 'active']];
+    return { type: 'add', list: list, item: item };
+  }
 
   function applyConfig(c, op) {
+    if (op.type === 'add') {
+      c[op.list] = c[op.list] || [];
+      if (!find(c[op.list], op.item.id)) c[op.list].push(op.item);
+      return c;
+    }
     var item = find(c[op.list], op.id);
     if (!item) return c;
     if (op.type === 'rename') { if (op.name) item.name = op.name; return c; }
@@ -304,7 +346,8 @@ var Core = (function () {
     WEEKDAYS: WEEKDAYS, pad: pad, ymd: ymd, parse: parse, addDays: addDays, diffDays: diffDays, today: today,
     hhmm: hhmm, weekday: weekday, monday: monday, monthOf: monthOf, weeks: weeks, statusOn: statusOn, find: find,
     dayOf: dayOf, entryOf: entryOf, isDone: isDone, windowOf: windowOf, cell: cell, weekCount: weekCount,
-    hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, isSet: isSet, apply: apply, isConfigOp: isConfigOp, applyConfig: applyConfig,
+    hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, isSet: isSet, apply: apply, dayText: dayText,
+    isConfigOp: isConfigOp, newItem: newItem, applyConfig: applyConfig,
     serialize: serialize, serializeConfig: serializeConfig, toB64: toB64, fromB64: fromB64, newId: newId
   };
 })();

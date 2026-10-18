@@ -59,6 +59,7 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .ledger .scroller::-webkit-scrollbar { display: none; }
 .lrow { display: flex; align-items: center; gap: var(--wgap); width: max-content; padding: 3px 0; }
 .lrow.head { padding-bottom: 6px; }
+.lrow.head .lab { margin-bottom: -9px; padding-bottom: 9px; }   /* covers the note dots under the dates passing beneath */
 .lab {
   position: sticky; left: 0; z-index: 1; width: var(--label); flex: none; align-self: stretch; margin: -3px 0; padding-top: 3px; padding-bottom: 3px;
   display: flex; flex-direction: column; justify-content: center; background: var(--surface); padding-right: 6px; min-width: 0;
@@ -115,6 +116,33 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
   .name { font-size: 13.5px; }
 }
 
+.addb { display: block; background: none; border: 0; padding: 2px 2px 0; color: var(--faint); font-size: 18px; line-height: 1; }
+@media (hover: hover) { .addb:hover { color: var(--text); } }
+
+/* ---- today: the day as a line (sleep, screen, client work), then the day's note */
+.today .th { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.today .sums { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
+.cdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+.dline { position: relative; height: 16px; background: #1b1c20; border-radius: 4px; }
+.dline i { position: absolute; display: block; }
+.dline .awake { top: 0; bottom: 0; background: #23252a; border-radius: 4px; }
+.dline .sl { top: 9px; height: 5px; background: #4b4a86; border-radius: 3px; }
+.dline .scr { top: 9px; height: 5px; background: #55585f; border-radius: 3px; }
+.dline .wk { top: 2px; height: 6px; border-radius: 3px; }
+.dline .now { top: -3px; bottom: -3px; width: 1px; background: #80838b; }
+.marks, .hours { position: relative; height: 16px; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.mk { position: absolute; top: 2px; transform: translateX(-50%); }
+.mk::before { content: ''; position: absolute; left: 50%; top: -20px; height: 18px; border-left: 1px dashed #4a4d54; }
+.mk b { font-weight: 400; }
+.mk.real { color: var(--muted); }
+.mk.real::before { border-left-style: solid; border-color: #6a6d75; }
+.hours { display: flex; justify-content: space-between; height: auto; margin-top: -2px; color: #3d4046; }
+.dtext {
+  display: block; resize: none; overflow: hidden; margin-top: 10px; min-height: 44px; line-height: 1.5;
+  background: #141518; border: 1px solid transparent; border-radius: 10px; font-size: 15px;
+}
+.dtext:focus { border-color: #3a3d43; }
+
 /* ---- the popover (a box's note, a day's notes, a name, unticking an earlier day) */
 #pop {
   position: fixed; z-index: 20; background: var(--surface2); border: 1px solid #33363c; border-radius: 12px;
@@ -126,13 +154,13 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 #pop[hidden] { display: none; }
 #pop textarea { resize: none; overflow: hidden; min-height: 40px; margin-top: 6px; }
 .ph { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-#pop input.nm { font-size: 16px; }
+#pop input.nm { font-size: 16px; margin-top: 6px; }
+#pop input.dose { margin-top: 8px; width: 50%; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chips[hidden] { display: none; }
+.chip { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 13px; color: var(--muted); }
+.chip.on { color: var(--text); border-color: #4a4e56; background: var(--surface); }
 .ph i { width: 3px; height: 13px; border-radius: 2px; flex: none; }
-.dn { display: flex; gap: 8px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
-.dn .t { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
-.dn .x { flex: 1; white-space: pre-wrap; }
-.dn .del { background: none; border: 0; color: var(--faint); padding: 0 2px; font-size: 13px; }
-.dn .del.armed { color: var(--danger); }
 
 /* ---- shared bits */
 .row { display: flex; gap: 8px; align-items: center; }

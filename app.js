@@ -3,8 +3,11 @@
 //   click a box                                   done / not done (gym: the gym panel; supplement: taken now);
 //                                                 unticking an earlier day asks first
 //   right-click, Ctrl/Alt+click, long-press a box its note (Enter saves, Esc closes)
-//   click a date                                  that day's notes (how it went)
+//   click a date                                  that day's note (what it went into, how it went)
 //   click a name                                  rename it (Enter saves), Archive
+//   +                                             a new task or supplement
+// Under them, today: the day as a line (sleep, screen time, client work from the laptop's time
+// tracker) and the day's note, written in place.
 // Drawn from Store's data with Core's rules; every change goes through Store.change().
 
 (() => {
@@ -49,9 +52,11 @@
     const L = shown = layout(labels), dates = Core.weeks(now, L.weeks), scroll = scrollState();
     const tasks = Core.rows(cfg, data, dates, now).filter(r => r.cells.some(c => c.state !== 'none' && c.state !== 'off'));
     const supps = Core.suppRows(cfg, data, dates, now);
-    main.innerHTML = (tasks.length ? ledger('tasks', tasks, dates, L, data) : '') + (supps.length ? ledger('supps', supps, dates, L, data) : '');
+    main.innerHTML = (tasks.length ? ledger('tasks', tasks, dates, L, data) : '') + (supps.length ? ledger('supps', supps, dates, L, data) : '') +
+      todayCard(data, now);
     restoreScroll(scroll);
     fade();
+    main.querySelectorAll('.dtext').forEach(grow);
   }
 
   function renderStatus() {
@@ -137,7 +142,7 @@
     for (let i = 0; i < dates.length; i += 7) weeks.push(dates.slice(i, i + 7));
     const head = `<div class="lrow head"><div class="lab">${list === 'supps' ? '<span class="title">supplements</span>' : ''}</div>` +
       weeks.map(w => `<div class="wk">${w.map((d, i) => {
-        const noted = ((Core.dayOf(data, d) || {}).notes || []).length;
+        const noted = !!Core.dayText(data, d);
         return `<button class="dh${d === now ? ' today' : ''}${noted ? ' noted' : ''}" data-day="${d}" title="${pretty(d)}"><span>${'MTWTFSS'[i]}</span>${+d.slice(8)}</button>`;
       }).join('')}</div>`).join('') + '</div>';
     const body = rows.map(r => {
@@ -150,7 +155,7 @@
     }).join('');
     return `<section class="card ledger" data-list="${list}" ` +
       `style="--cell:${L.cell}px;--label:${L.label}px;--gap:${GAP}px;--wgap:${WEEK_GAP}px">` +
-      `<div class="scroller">${head}${body}</div></section>`;
+      `<div class="scroller">${head}${body}</div><button class="addb" data-add="${list}" aria-label="Add">+</button></section>`;
   }
 
   function box(r, c, list, color) {
@@ -158,6 +163,73 @@
     return `<button class="sq s-${c.state}${c.note ? ' noted' : ''}" style="--c:${color}" data-id="${r.id}" data-list="${list}" ` +
       `data-date="${c.date}"></button>`;
   }
+
+  // ---- Today: the day as a line from midnight to midnight, and the day's note
+
+  const hm = min => `${Math.floor(min / 60)}:${Core.pad(Math.round(min) % 60)}`;
+  const toMin = t => +t.slice(0, 2) * 60 + +t.slice(3, 5);
+  const spansOf = at => String(at || '').split(' ').filter(Boolean).map(x => x.split('-').map(toMin));
+
+  // Sleep is kept on the day you woke up: { at: [["2026-10-17 23:08", "2026-10-18 02:07"], ...], min, ... }.
+  // A day's line takes that morning's (and naps), and the evening's from the next day's record.
+  function sleepOn(data, date) {
+    const out = { spans: [], woke: null, slept: null };
+    const clip = (a, b) => {
+      const x = Core.diffDays(date, a.slice(0, 10)) * 1440 + toMin(a.slice(11)), y = Core.diffDays(date, b.slice(0, 10)) * 1440 + toMin(b.slice(11));
+      return y <= 0 || x >= 1440 ? null : [Math.max(0, x), Math.min(1440, y), x, y];
+    };
+    for (const d of [date, Core.addDays(date, 1)]) {
+      for (const [a, b] of ((Core.dayOf(data, d) || {}).sleep || {}).at || []) {
+        const c = clip(a, b);
+        if (!c) continue;
+        out.spans.push(c);
+        if (d === date && c[3] < 15 * 60) out.woke = Math.max(out.woke ?? 0, c[3]);
+        if (d !== date && c[2] >= 15 * 60 && (out.slept == null || c[2] < out.slept)) out.slept = c[2];
+      }
+    }
+    return out;
+  }
+
+  function todayCard(data, date) {
+    const day = Core.dayOf(data, date) || {}, pc = day.pc || {}, sl = sleepOn(data, date), sleep = day.sleep;
+    const pct = m => (m / 1440 * 100).toFixed(2) + '%';
+    const bar = (a, b, cls, color) => `<i class="${cls}" style="left:${pct(a)};width:max(2px,${pct(b - a)})${color ? ';background:' + color : ''}"></i>`;
+    const woke = sl.woke ?? 7 * 60, slept = sl.slept ?? 23 * 60;
+    const nowMin = date === Core.today() ? new Date().getHours() * 60 + new Date().getMinutes() : null;
+    let line = `<i class="awake" style="left:${pct(woke)};width:${pct(Math.max(0, slept - woke))}"></i>`;
+    for (const [a, b] of sl.spans) line += bar(a, b, 'sl');
+    for (const [a, b] of spansOf(pc.screen && pc.screen.at)) line += bar(a, b, 'scr');
+    for (const w of pc.work || []) for (const [a, b] of spansOf(w.at)) line += bar(a, b, 'wk', w.color);
+    const mark = (m, real) => `<span class="mk${real ? ' real' : ''}" style="left:${pct(m)}"><b>${hm(m % 1440)}</b></span>`;
+    if (nowMin != null) line += `<i class="now" style="left:${pct(nowMin)}"></i>`;
+    const sums = [
+      sleep && sleep.min ? `<span>slept ${hm(sleep.min)}</span>` : '',
+      ...(pc.work || []).map(w => `<span><i class="cdot" style="background:${esc(w.color)}"></i>${esc(w.client)} ${hm(w.min)}</span>`),
+      pc.screen ? `<span class="muted">screen ${hm(pc.screen.min)}</span>` : '',
+    ].join('');
+    return `<section class="card today"><div class="th"><span class="title">today</span><span class="sums">${sums}</span></div>` +
+      `<div class="dline">${line}</div>` +
+      `<div class="marks">${mark(woke, sl.woke != null)}${mark(Math.min(slept, 1439), sl.slept != null)}</div>` +
+      `<div class="hours"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>` +
+      `<textarea class="dtext" rows="1" data-date="${date}" aria-label="Today's note">${esc(Core.dayText(data, date))}</textarea></section>`;
+  }
+
+  // Saved when it loses focus. The page redraws a moment later, so a click that took the focus (a box)
+  // still lands.
+  let quiet = false;
+  function saveDayText(ta) {
+    const text = ta.value.trim(), date = ta.dataset.date;
+    if (text === Core.dayText(Store.data(), date)) return;
+    quiet = true;
+    Store.change({ type: 'dayText', date, text });
+    quiet = false;
+    setTimeout(() => { if (deferred && !typing() && pop.hidden) render(); }, 300);
+  }
+  main.addEventListener('input', ev => { if (ev.target.matches('.dtext')) grow(ev.target); });
+  main.addEventListener('focusout', ev => { if (ev.target.matches('.dtext')) saveDayText(ev.target); });
+  main.addEventListener('keydown', ev => {
+    if (ev.target.matches('.dtext') && ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); ev.target.blur(); }
+  });
 
   // ---- Taps
 
@@ -234,20 +306,39 @@
   }
 
   function dayPop(el) {
-    const date = el.dataset.day, notes = (Core.dayOf(Store.data(), date) || {}).notes || [];
-    openPop(el, `<div class="ph">${pretty(date)}</div>` +
-      notes.map(n => `<div class="dn">${n.t ? `<span class="t">${n.t}</span>` : ''}<span class="x">${esc(n.text)}</span>` +
-        `<button class="del" data-pop="del" data-note="${n.id}" aria-label="Delete">×</button></div>`).join('') +
-      '<textarea rows="1"></textarea>', {
+    const date = el.dataset.day, cur = Core.dayText(Store.data(), date);
+    openPop(el, `<div class="ph">${pretty(date)}</div><textarea rows="2">${esc(cur)}</textarea>`, {
       save: () => {
         const text = pop.querySelector('textarea').value.trim();
-        if (text) Store.change({ type: 'dayNote', date, note: { id: Core.newId(), t: date === Core.today() ? Core.hhmm() : '', text } });
+        if (text !== cur) Store.change({ type: 'dayText', date, text });
       },
-      del: b => {
-        if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'delete?'; return; }
-        Store.change({ type: 'undayNote', date, id: b.dataset.note });
-        b.closest('.dn').remove();
+    });
+  }
+
+  // A new task (daily, optional or on one weekday) or supplement (with its dose). Enter adds it.
+  function addPop(el) {
+    const list = el.dataset.add, wd = Core.WEEKDAYS[Core.weekday(Core.today())];
+    const chips = list === 'supps' ? '<input class="dose" aria-label="Dose" autocomplete="off">' :
+      '<div class="chips">' + [['daily', 'daily'], ['optional', 'optional'], ['weekly', 'weekly']]
+        .map(([k, t], i) => `<button class="chip${i ? '' : ' on'}" data-pop="kind" data-kind="${k}">${t}</button>`).join('') + '</div>' +
+      '<div class="chips days" hidden>' + ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+        .map(d => `<button class="chip${d === wd ? ' on' : ''}" data-pop="day" data-day="${d}">${d}</button>`).join('') + '</div>';
+    openPop(el, `<div class="ph">${list === 'supps' ? 'new supplement' : 'new task'}</div>` +
+      `<input class="nm" aria-label="Name" autocomplete="off" autocapitalize="off">${chips}`, {
+      save: () => {
+        const name = pop.querySelector('.nm').value.trim();
+        if (!name) return;
+        const cfg = Store.config();
+        if (list === 'supps') return Store.change(Core.newItem(cfg, 'supplements', name, { dose: pop.querySelector('.dose').value.trim() }));
+        const kind = pop.querySelector('.chips .on').dataset.kind, day = pop.querySelector('.days .on').dataset.day;
+        Store.change(Core.newItem(cfg, 'tasks', name, kind === 'weekly' ? { kind: 'weekly', day } : kind === 'optional' ? { kind: 'daily', must: false } : { kind: 'daily' }));
       },
+      kind: b => {
+        pop.querySelectorAll('[data-kind]').forEach(x => x.classList.toggle('on', x === b));
+        pop.querySelector('.days').hidden = b.dataset.kind !== 'weekly';
+        pop.querySelector('.nm').focus();
+      },
+      day: b => { pop.querySelectorAll('[data-day]').forEach(x => x.classList.toggle('on', x === b)); pop.querySelector('.nm').focus(); },
     });
   }
 
@@ -317,6 +408,7 @@
     if (ds.id && ds.date) return ev.ctrlKey || ev.altKey || ev.metaKey ? notePop(el) : tap(el);
     if (ds.day) return dayPop(el);
     if (ds.info) return namePop(el);
+    if (ds.add) return addPop(el);
     if (ds.act === 'settings') return openSettings();
   });
 
@@ -545,7 +637,7 @@
 
   Store.onChange(what => {
     if (what === 'status') return renderStatus();
-    if (!pop.hidden || typing()) { deferred = true; return renderStatus(); }
+    if (!pop.hidden || typing() || quiet) { deferred = true; return renderStatus(); }
     render();
     if (!sheetEl.hidden) renderSheet();
   });

@@ -94,7 +94,8 @@ const Store = (() => {
 
   function message(ops) {
     const kinds = { task: 'tasks', note: 'notes', supp: 'supplements', suppNote: 'notes', dayNote: 'day notes', undayNote: 'day notes',
-      gymDay: 'gym', gymNote: 'gym', gymEx: 'gym', status: 'archive', rename: 'names' };
+      gymDay: 'gym', gymNote: 'gym', gymEx: 'gym', status: 'archive', rename: 'names', add: 'new items', dayText: 'day note',
+      pc: 'time', sleep: 'sleep' };
     const what = [...new Set(ops.map(q => kinds[q.op.type] || q.op.type))].join(', ');
     const dates = [...new Set(ops.map(q => q.op.date).filter(Boolean))].sort();
     return `${settings.device}: ${what} ${dates.join(', ')}`;
