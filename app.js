@@ -232,9 +232,9 @@
         return `<button class="dh${d === now ? ' today' : ''}${n === 1 ? ' m1' : ''}" data-day="${d}" title="${pretty(d)}"><span>${'MTWTFSS'[i]}</span>${lbl}</button>`;
       }).join('')}</div>`).join('') + '</div>';
     const body = list === 'todo' ? todoRows(rows, weeks, dates, L) : list === 'health' ? rows.map(r =>
-      `<div class="lrow"><div class="lab"><span class="name"><i style="background:${r.color}"></i><span class="n">${r.name}</span>` +
+      `<div class="lrow${r.tall ? ' tall' : ''}"><div class="lab"><span class="name"><i style="background:${r.color}"></i><span class="n">${r.name}</span>` +
       `${r.hint ? `<span class="hint">${r.hint}</span>` : ''}</span></div>` +
-      weeks.map(w => `<div class="wk">${w.map(d => metric(r, d)).join('')}</div>`).join('') + '</div>').join('') : rows.map(r => {
+      weeks.map(w => `<div class="wk">${w.map(d => (r.tall ? night(r, d, L) : fill(r, d))).join('')}</div>`).join('') + '</div>').join('') : rows.map(r => {
       const c = colorOf(r);
       return `<div class="lrow"><div class="lab"><button class="name" data-info="${r.id}" data-list="${list}">` +
         (prefs.colors && r.color ? `<i style="background:${c}"></i>` : '') +
@@ -251,15 +251,18 @@
       (list === 'todo' || list === 'health' ? '' : `<button class="addb" data-add="${list}" aria-label="Add">+</button>`) + '</section>';
   }
 
-  // ---- Health: Apple Health's steps and the nights' sleep, a value a day (docs/HEALTH.md); a row shows once it
-  // has a day. Beside the name, the last 7 days' average.
-  const STEPS = '#6cb4c4', SLEEP = '#8e8bd6';
+  // ---- Health: Apple Health's steps and the nights' sleep, a day each (docs/HEALTH.md); a row shows once it has
+  // a day. Beside the name, the last 7 days' average.
+  //   steps  a box filling up from the bottom, full at 7,000 (the goal)
+  //   sleep  a taller row: the night as a vertical line, its length the time asleep (up to 12 hours), broken
+  //          where he woke up; a faint mark at 8 hours; the hours under it
+  const STEPS = '#6cb4c4', SLEEP = '#8e8bd6', STEP_GOAL = 7000;
   function healthRows(data, dates, now) {
-    const steps = {}, sleep = {};
+    const steps = {}, sleep = {}, nights = {};
     for (const d of dates) {
       const day = Core.dayOf(data, d);
       if (day && day.steps) steps[d] = day.steps.n;
-      if (day && day.sleep && day.sleep.min) sleep[d] = day.sleep.min;
+      if (day && day.sleep && day.sleep.min) { sleep[d] = day.sleep.min; nights[d] = day.sleep; }
     }
     const avg = (vals, fmt) => {
       const l = [];
@@ -267,23 +270,33 @@
       return l.length ? 'avg ' + fmt(Math.round(l.reduce((a, b) => a + b, 0) / l.length)) : '';
     };
     const out = [];
-    if (Object.keys(steps).length) out.push({ name: 'steps', color: STEPS, vals: steps, full: 10000, fmt: kSteps, hint: avg(steps, kSteps) });
-    if (Object.keys(sleep).length) out.push({ name: 'sleep', color: SLEEP, vals: sleep, full: 480, fmt: hm, hint: avg(sleep, hm) });
+    if (Object.keys(steps).length) out.push({ name: 'steps', color: STEPS, vals: steps, full: STEP_GOAL, fmt: kSteps, hint: avg(steps, kSteps) });
+    if (Object.keys(sleep).length) out.push({ name: 'sleep', color: SLEEP, vals: sleep, nights, fmt: hm, hint: avg(sleep, hm), tall: true });
     return out;
   }
   const kSteps = n => (n < 1000 ? String(Math.round(n)) : n < 9950 ? (n / 1000).toFixed(1) + 'k' : Math.round(n / 1000) + 'k');
-  // One day's value: a number (a), a bar rising with it (b), or a box tinted by it with the number (c); full at
-  // 10k steps / 8 hours
-  function metric(r, d) {
+  // A day's steps: the box fills up from the bottom; at the goal it's full, like a ticked box
+  function fill(r, d) {
     const v = r.vals[d];
-    if (v == null) return `<span class="sq mv" data-date="${d}"></span>`;
-    const k = Math.min(1, v / r.full), look = prefs.look || 'a', t = `title="${pretty(d)}: ${r.fmt(v)}"`;
-    if (look === 'b') return `<span class="sq mb" data-date="${d}" ${t}><i style="height:${Math.max(8, k * 100)}%;background:${r.color}"></i></span>`;
-    if (look === 'c') {
-      const [x, y, z] = [1, 3, 5].map(i => parseInt(r.color.slice(i, i + 2), 16));
-      return `<span class="sq mt" data-date="${d}" ${t} style="background:rgba(${x},${y},${z},${(0.12 + 0.7 * k).toFixed(2)})">${r.fmt(v)}</span>`;
-    }
-    return `<span class="sq mv${k >= 1 ? ' full' : ''}" data-date="${d}" ${t} style="--c:${r.color}">${r.fmt(v)}</span>`;
+    if (v == null) return `<span class="sq mb" data-date="${d}"></span>`;
+    const k = Math.min(1, v / r.full);
+    return `<span class="sq mb${k >= 1 ? ' full' : ''}" data-date="${d}" title="${pretty(d)}: ${v.toLocaleString('en-US')} steps">` +
+      `<i style="height:${Math.max(8, k * 100).toFixed(1)}%;background:${r.color}"></i></span>`;
+  }
+  // A night: the time asleep as a vertical line, 12 hours = the row's height (less the hours under it). Broken where
+  // he woke up: at the gaps between Apple Health's In Bed stretches, or, for a night from the screenshots (woke = how
+  // many times), evenly.
+  function night(r, d, L) {
+    const s = r.nights[d], rowH = Math.round(L.cell * 3), room = rowH - 14, per = room / 720;
+    const guide = `--g:${Math.round(14 + 480 * per)}px`;
+    if (!s) return `<span class="sq sl" data-date="${d}" style="${d <= Core.today() ? guide : ''}"></span>`;
+    const spans = (s.at || []).map(([a, b]) => Core.diffDays(a.slice(0, 10), b.slice(0, 10)) * 1440 + toMin(b.slice(11)) - toMin(a.slice(11))).filter(m => m > 0);
+    const woke = s.woke != null ? s.woke : Math.max(0, spans.length - 1);
+    const parts = spans.length === woke + 1 ? spans : Array(woke + 1).fill(1);
+    const sum = parts.reduce((a, b) => a + b, 0), len = Math.min(room, s.min * per);
+    const segs = parts.map(p => `<i style="height:${Math.max(2, len * p / sum - (woke ? 2 : 0)).toFixed(1)}px"></i>`).join('');
+    return `<span class="sq sl" data-date="${d}" style="${guide};--c:${r.color}" title="${pretty(d)}: slept ${hm(s.min)}, woke ${woke}×">` +
+      `<span class="ln">${segs}</span><b>${hm(s.min)}</b></span>`;
   }
 
   // ---- Moving the cards: hold a card's title for half a second, then drag it up or down. The order is kept on

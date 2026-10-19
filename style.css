@@ -61,13 +61,17 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .grip { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: grab; }
 .card.lifted { z-index: 6; box-shadow: 0 12px 32px rgba(0, 0, 0, .55), 0 0 0 1px rgba(240, 180, 99, .35); }
 
-/* health: a value a day (look a: the number, b: a bar, c: a tinted box) */
-.sq.mv, .sq.mt { display: flex; align-items: center; justify-content: center; font-size: 10px; letter-spacing: -.3px;
-  font-variant-numeric: tabular-nums; color: var(--muted); background: none; }
-.sq.mv.full { color: var(--c); }
-.sq.mt { color: var(--text); }
+/* health: steps fill their box; sleep is a tall row of vertical lines (the night), broken where he woke */
 .sq.mb { display: flex; align-items: flex-end; background: #1b1c20; overflow: hidden; }
-.sq.mb i { display: block; width: 100%; border-radius: 3px 3px 0 0; opacity: .85; }
+.sq.mb i { display: block; width: 100%; border-radius: 3px 3px 0 0; opacity: .8; }
+.sq.mb.full i { border-radius: 0; opacity: 1; }
+.lrow.tall .sq { height: calc(var(--cell) * 3); }
+.sq.sl { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border-radius: 0;
+  background: linear-gradient(to top, transparent var(--g, -9px), #2b2d33 var(--g, -9px), #2b2d33 calc(var(--g, -9px) + 1px), transparent calc(var(--g, -9px) + 1px)); }
+.sq.sl .ln { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+.sq.sl .ln i { display: block; width: 6px; border-radius: 3px; background: var(--c); }
+.sq.sl b { font-weight: 400; font-size: 9.5px; letter-spacing: -.3px; color: var(--muted); height: 14px; line-height: 14px;
+  font-variant-numeric: tabular-nums; }
 .ledger .scroller { position: relative; z-index: 1; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
 .ledger .scroller::-webkit-scrollbar { display: none; }
 .lrow { display: flex; align-items: center; gap: var(--wgap); width: max-content; padding: 3px 0; }
