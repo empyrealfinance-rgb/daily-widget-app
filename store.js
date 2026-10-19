@@ -72,8 +72,9 @@ const Store = (() => {
     return wanted.length;
   }
 
-  // The phone's Shortcut leaves what Apple Health has (steps, the night's In Bed times) in inbox/ as small
-  // text files (docs/HEALTH.md): each becomes ordinary changes to the month files, then it's removed.
+  // The phone's Shortcut leaves what Apple Health has (steps, the night's In Bed times, heart rate) in inbox/ as
+  // small text files (docs/HEALTH.md): each becomes ordinary changes to the month files, then it's removed. The
+  // desk widget does the same; whichever comes first.
   let inbox = false;
   async function readInbox() {
     if (!inbox) return 0;
@@ -81,7 +82,7 @@ const Store = (() => {
     let n = 0;
     for (const f of list.filter(f => f.type === 'file' && /\.txt$/i.test(f.name))) {
       const r = await call('GET', f.path);
-      if (r) for (const op of Core.healthOps(f.name, Core.fromB64(r.content))) { queue.push({ path: pathOf(op), op }); n++; }
+      if (r) for (const op of Core.healthOps(f.name, Core.fromB64(r.content), config())) { queue.push({ path: pathOf(op), op }); n++; }
       write(KEY.queue, queue);
       try { await call('DELETE', f.path, { message: `${settings.device}: health from the phone`, sha: f.sha, branch: 'main' }); }
       catch (e) { if (![404, 409, 422].includes(e.status)) throw e; }   // another device got there first
@@ -117,7 +118,7 @@ const Store = (() => {
   function message(ops) {
     const kinds = { task: 'tasks', note: 'notes', supp: 'supplements', suppNote: 'notes', dayNote: 'day notes', undayNote: 'day notes',
       gymDay: 'gym', gymNote: 'gym', gymEx: 'gym', status: 'archive', rename: 'names', add: 'new items', dayText: 'day note',
-      pc: 'time', sleep: 'sleep', steps: 'health', healthSleep: 'health', order: 'order', todoAdd: 'to-dos', todoDone: 'to-dos', todoEdit: 'to-dos', todoDel: 'to-dos' };
+      pc: 'time', sleep: 'sleep', steps: 'health', healthSleep: 'health', heart: 'health', order: 'order', todoAdd: 'to-dos', todoDone: 'to-dos', todoEdit: 'to-dos', todoDel: 'to-dos' };
     const what = [...new Set(ops.map(q => kinds[q.op.type] || q.op.type))].join(', ');
     const dates = [...new Set(ops.map(q => q.op.date).filter(Boolean))].sort();
     return `${settings.device}: ${what} ${dates.join(', ')}`;

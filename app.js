@@ -61,6 +61,8 @@
     main.innerHTML = ledger('todo', todos, dates, L) + ledger('tasks', tasks, dates, L) + (supps.length ? ledger('supps', supps, dates, L) : '') +
       todayCard(data, now);
     restoreScroll(scroll);
+    homeKeeper.disconnect();
+    main.querySelectorAll('.ledger .scroller').forEach(sc => homeKeeper.observe(sc));
     fade();
     main.querySelectorAll('.dtext').forEach(grow);
   }
@@ -101,8 +103,10 @@
     let cell = 24;
     const fit = Math.floor((avail + WEEK_GAP) / (7 * cell + 6 * GAP + WEEK_GAP));
     if (fit < 2) {
-      cell = Math.max(20, Math.min(34, Math.floor((avail - 6 * GAP) / 7)));
-      label = Math.max(label, inner - WEEK_GAP - 7 * cell - 6 * GAP);   // what's left over goes to the names: no sliver of last week
+      // a phone: seven days in view, whichever they are (a week's gap among them or not): what's left over goes to
+      // the names, so no sliver of another day shows
+      cell = Math.max(20, Math.min(34, Math.floor((avail - 6 * GAP - WEEK_GAP) / 7)));
+      label = Math.max(label, inner - 2 * WEEK_GAP - 7 * cell - 6 * GAP);
     }
     // how many of the oldest days in view fade out: 4 on a phone, a week when two fit, two weeks when more do
     const fadeDays = fit < 2 ? 4 : fit < 3 ? 7 : 14;
@@ -187,14 +191,18 @@
     if (!fading) { fading = true; requestAnimationFrame(fade); }
   }, true);
 
-  // Where the ledgers open: this week at the right edge, or tomorrow when that's further (on a Sunday).
-  // A redraw keeps them where they were swiped to (or at that spot, when they weren't); the date at the top
-  // brings them back.
+  // Where the ledgers open: tomorrow at the right edge, as on the widget (a phone: the five days before today,
+  // today, tomorrow); swipe on for the days to come. A redraw keeps them where they were swiped to (or at that
+  // spot, when they weren't); the date at the top brings them back.
   function homeLeft(sc) {
-    const now = Core.today(), sun = Core.addDays(Core.monday(now), 6), end = sun > now ? sun : Core.addDays(now, 1);
-    const dh = sc.querySelector(`.dh[data-day="${end}"]`);
+    const dh = sc.querySelector(`.dh[data-day="${Core.addDays(Core.today(), 1)}"]`);
     return dh ? Math.max(0, dh.offsetLeft + dh.offsetWidth + 1 - sc.clientWidth) : sc.scrollWidth;
   }
+  // A launch can lay the page out at another width first, or hidden (the Home Screen app does): while the
+  // ledgers are at home, they stay there whatever width they end up with.
+  const homeKeeper = new ResizeObserver(() => {
+    if (atHome) main.querySelectorAll('.ledger .scroller').forEach(sc => { sc.scrollLeft = homeLeft(sc); });
+  });
   function scrollState() {
     const sc = main.querySelector('.ledger .scroller');
     return sc ? { left: sc.scrollLeft } : null;
@@ -360,6 +368,7 @@
 
   function todayCard(data, date) {
     const day = Core.dayOf(data, date) || {}, pc = day.pc || {}, sl = sleepOn(data, date), sleep = day.sleep;
+    const ct = Core.cardioTask(Store.config()), heart = day.heart;
     const pct = m => (m / 1440 * 100).toFixed(2) + '%';
     const bar = (a, b, cls, color) => `<i class="${cls}" style="left:${pct(a)};width:max(2px,${pct(b - a)})${color ? ';background:' + color : ''}"></i>`;
     const woke = sl.woke ?? 7 * 60, slept = sl.slept ?? 23 * 60;
@@ -368,6 +377,7 @@
     for (const [a, b] of sl.spans) line += bar(a, b, 'sl');
     for (const [a, b] of spansOf(pc.screen && pc.screen.at)) line += bar(a, b, 'scr');
     for (const w of pc.work || []) for (const [a, b] of spansOf(w.at)) line += bar(a, b, 'wk', w.color);
+    for (const [a, b] of spansOf(heart && heart.cardio)) line += bar(a, b, 'cd', ct && ct.color);
     const mark = (m, real) => `<span class="mk${real ? ' real' : ''}" style="left:${pct(m)}"><b>${hm(m % 1440)}</b></span>`;
     if (nowMin != null) line += `<i class="now" style="left:${pct(nowMin)}"></i>`;
     const notes = Core.dayNotes(data, date);
@@ -375,6 +385,7 @@
     const sums = [
       sleep && sleep.min ? `<span>slept ${hm(sleep.min)}</span>` : '',
       day.steps ? `<span>${day.steps.n.toLocaleString('en-US')} steps</span>` : '',
+      heart ? `<span>cardio ${Core.cardioMin(ct, heart)} min</span>` : '',
       ...(pc.work || []).map(w => `<span><i class="cdot" style="background:${esc(w.color)}"></i>${esc(w.client)} ${hm(w.min)}</span>`),
       pc.screen ? `<span class="muted">screen ${hm(pc.screen.min)}</span>` : '',
     ].join('');
@@ -773,6 +784,18 @@
     return out;
   }
   const previous = (name, date) => (gymHistory()[name] || []).filter(x => x.date < date).pop() || null;
+  // The exercise that came after this one the last time it was done, and isn't in this day's yet: "next"
+  function nextEx(name, date) {
+    const data = Store.data(), done = ((gymDay(date) || {}).ex || []).map(e => e.name), days = [];
+    for (const m of Object.keys(data)) for (const d of Object.keys(data[m].days || {})) if (d < date) days.push(d);
+    for (const d of days.sort().reverse()) {
+      const names = ((gymDay(d) || {}).ex || []).map(e => e.name), i = names.indexOf(name);
+      if (i < 0) continue;
+      const after = names.slice(i + 1).find(n => !done.includes(n));
+      if (after) return after;
+    }
+    return null;
+  }
   const gymDay = d => (Core.dayOf(Store.data(), d) || {}).gym || null;
   const exOf = (d, name) => ((gymDay(d) || {}).ex || []).find(e => e.name === name) || null;
 
@@ -823,18 +846,30 @@
       `<ol class="sets">${sets.map((s, i) => `<li><span><span class="n">${i + 1}</span>${kgText(s[0])} × ${s[1] ?? '?'}</span>` +
         `<button class="del${gym.armed === i ? ' armed' : ''}" data-del="${i}">${gym.armed === i ? 'delete?' : '✕'}</button></li>`).join('')}</ol>` +
       `<div class="steppers">
-        <div class="stepper"><span class="lbl">kg (BW = bodyweight)</span><div class="ctl"><button data-step="kg,-1">−</button>` +
+        <div class="stepper"><span class="lbl">kg<button class="bwb" data-bw aria-label="Bodyweight">BW</button></span><div class="ctl"><button data-step="kg,-1">−</button>` +
         `<input id="kg" inputmode="decimal" value="${kgText(next[0])}"><button data-step="kg,1">+</button></div></div>
         <div class="stepper"><span class="lbl">reps</span><div class="ctl"><button data-step="reps,-1">−</button>` +
         `<input id="reps" inputmode="numeric" value="${next[1] ?? ''}"><button data-step="reps,1">+</button></div></div>
       </div>` +
       `<button class="btn wide primary big" data-g="addset">Add set ${sets.length + 1}</button>` +
+      (sets.length ? nextButton() : '') +
       (sets.length ? `<label>note<input id="exnote" value="${esc(e.note)}"></label>` : '');
+  }
+  // After a set: on to the next exercise (what followed this one last time), or to the list to pick one
+  function nextButton() {
+    const n = nextEx(gym.ex, gym.date);
+    return n ? `<button class="btn wide" data-next="${esc(n)}">next: ${esc(n)} ›</button>` : '<button class="btn wide" data-next="">next exercise ›</button>';
   }
 
   function step(field, dir) {
     const el = $('#' + field);
-    if (field === 'kg') el.value = kgText(Math.round(((parseKg(el.value) ?? 0) + dir * 2.5) * 100) / 100);
+    if (field === 'kg') {
+      // 2.5 kg a step; going down (or up from assisted) stops at bodyweight on the way: BW, not 0 or past it
+      const was = parseKg(el.value) ?? 0;
+      let k = Math.round((was + dir * 2.5) * 100) / 100;
+      if ((was > 0 && k < 0) || (was < 0 && k > 0)) k = 0;
+      el.value = kgText(k === 0 ? null : k);
+    }
     else el.value = Math.max(0, (parseInt(el.value, 10) || 0) + dir);
     gym.next = [parseKg($('#kg').value), parseInt($('#reps').value, 10)];
   }
@@ -866,6 +901,12 @@
     if (ds.ex) { gym.ex = ds.ex; gym.next = null; gym.armed = -1; return renderSheet(); }
     if (ds.pick) { gym.ex = ds.pick.trim().toLowerCase(); gym.picking = false; gym.search = ''; gym.next = null; gym.armed = -1; return renderSheet(); }
     if (ds.step) { const [f, dir] = ds.step.split(','); return step(f, +dir); }
+    if ('bw' in ds) { $('#kg').value = 'BW'; gym.next = [null, parseInt($('#reps').value, 10)]; return; }
+    if ('next' in ds) {
+      Object.assign(gym, { ex: ds.next || null, picking: !ds.next, search: '', next: null, armed: -1 });
+      renderSheet();
+      return !ds.next && $('#search') && $('#search').focus();
+    }
     if (ds.del) return deleteSet(+ds.del);
     switch (ds.g) {
       case 'pick': gym.picking = true; gym.search = ''; renderSheet(); return $('#search') && $('#search').focus();
@@ -924,7 +965,8 @@
     const items = Store.todo().items || [];
     const todosDone = items.filter(t => t.done && t.done.slice(0, 10) >= per.a && t.done.slice(0, 10) <= per.b);
     const todosOpen = items.filter(t => !t.done && t.on <= per.b).sort((x, y) => (x.on < y.on ? -1 : x.on > y.on ? 1 : 0));
-    const out = Object.assign({}, per, { all, days, tasks, supps, todosDone, todosOpen, screen: 0, pcDays: 0, clients: {}, sleepMin: 0, nights: 0, gym: 0, steps: 0, stepDays: 0, notes: [], boxNotes: [] });
+    const out = Object.assign({}, per, { all, days, tasks, supps, todosDone, todosOpen, screen: 0, pcDays: 0, clients: {}, sleepMin: 0, nights: 0, gym: 0, steps: 0, stepDays: 0, cardio: 0, heartDays: 0, notes: [], boxNotes: [] });
+    const ct = Core.cardioTask(cfg);
     for (const d of days) {
       const day = Core.dayOf(data, d) || {};
       if (day.pc) {
@@ -934,6 +976,7 @@
       }
       if (day.sleep && day.sleep.min) { out.nights++; out.sleepMin += day.sleep.min; }
       if (day.steps) { out.stepDays++; out.steps += day.steps.n; }
+      if (day.heart) { out.heartDays++; out.cardio += Core.cardioMin(ct, day.heart); }
       if (day.gym) out.gym++;
       for (const n of Core.dayNotes(data, d)) out.notes.push(Object.assign({ d }, n));
       for (const [kind, list] of [['tasks', cfg.tasks], ['supps', cfg.supplements]]) {
@@ -961,6 +1004,7 @@
       st.nights ? `<div><b>${hm(st.sleepMin / st.nights)}</b><span>sleep, ${st.nights} night${st.nights > 1 ? 's' : ''}</span></div>` : '',
       st.gym ? `<div><b>${st.gym}</b><span>gym sessions</span></div>` : '',
       st.stepDays ? `<div><b>${Math.round(st.steps / st.stepDays).toLocaleString('en-US')}</b><span>steps a day</span></div>` : '',
+      st.heartDays ? `<div><b>${Math.round(st.cardio / st.heartDays)} min</b><span>cardio a day</span></div>` : '',
     ].join('');
     return `<div class="sh"><span>analysis</span><button class="x" data-close aria-label="Close">×</button></div>` +
       `<div class="aperiod">${['week', 'month', 'year'].map(k => `<button class="chip${k === cls ? ' on' : ''}" data-a="${k}">${k}</button>`).join('')}` +
@@ -991,6 +1035,11 @@
     if (st.nights) lines.push(`Sleep: ${hm(st.sleepMin / st.nights)} on average over ${st.nights} nights`);
     if (st.gym) lines.push(`Gym: ${st.gym} sessions`);
     if (st.stepDays) lines.push(`Steps: ${Math.round(st.steps / st.stepDays)} a day on average over ${st.stepDays} days`);
+    if (st.heartDays) {
+      const ct = Core.cardioTask(Store.config());
+      lines.push(`Cardio (heart rate ${(ct && ct.bpm) || 110}+ bpm, Apple Health): ${Math.round(st.cardio / st.heartDays)} min a day on average over ${st.heartDays} days` +
+        (ct ? `, goal ${ct.min || 30} min` : ''));
+    }
     if (st.todosDone.length) { lines.push('', 'To-dos done:'); for (const t of st.todosDone) lines.push(`- ${pretty(t.done.slice(0, 10))}: ${t.text}`); }
     if (st.todosOpen.length) { lines.push('', 'To-dos still open:'); for (const t of st.todosOpen) lines.push(`- since ${pretty(t.on)}: ${t.text}`); }
     if (st.notes.length) { lines.push('', 'Journal:'); for (const n of st.notes) lines.push(`- ${pretty(n.d)}${n.t ? ' ' + n.t : ''}: ${n.text}`); }
