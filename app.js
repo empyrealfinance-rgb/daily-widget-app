@@ -173,19 +173,23 @@
   }
 
   // The ledgers move together: the one being swiped (or wheeled) leads, the others follow it.
-  let driver = null;
+  let driver = null, atHome = true;
   const lead = ev => { driver = ev.target.closest ? ev.target.closest('.scroller') : null; };
   main.addEventListener('touchstart', lead, { passive: true, capture: true });
   main.addEventListener('wheel', lead, { passive: true, capture: true });
   main.addEventListener('pointerdown', lead, true);
   main.addEventListener('scroll', ev => {
     const sc = ev.target;
-    if (sc === driver) main.querySelectorAll('.ledger .scroller').forEach(o => { if (o !== sc && Math.abs(o.scrollLeft - sc.scrollLeft) > 1) o.scrollLeft = sc.scrollLeft; });
+    if (sc === driver) {
+      main.querySelectorAll('.ledger .scroller').forEach(o => { if (o !== sc && Math.abs(o.scrollLeft - sc.scrollLeft) > 1) o.scrollLeft = sc.scrollLeft; });
+      atHome = Math.abs(sc.scrollLeft - homeLeft(sc)) < 4;
+    }
     if (!fading) { fading = true; requestAnimationFrame(fade); }
   }, true);
 
   // Where the ledgers open: this week at the right edge, or tomorrow when that's further (on a Sunday).
-  // A redraw keeps them where they were swiped to; the date at the top brings them back.
+  // A redraw keeps them where they were swiped to (or at that spot, when they weren't); the date at the top
+  // brings them back.
   function homeLeft(sc) {
     const now = Core.today(), sun = Core.addDays(Core.monday(now), 6), end = sun > now ? sun : Core.addDays(now, 1);
     const dh = sc.querySelector(`.dh[data-day="${end}"]`);
@@ -193,13 +197,14 @@
   }
   function scrollState() {
     const sc = main.querySelector('.ledger .scroller');
-    return sc ? { left: sc.scrollLeft, home: Math.abs(sc.scrollLeft - homeLeft(sc)) < 4 } : null;
+    return sc ? { left: sc.scrollLeft } : null;
   }
   function restoreScroll(s) {
-    main.querySelectorAll('.ledger .scroller').forEach(sc => { sc.scrollLeft = !s || s.home ? homeLeft(sc) : s.left; });
+    main.querySelectorAll('.ledger .scroller').forEach(sc => { sc.scrollLeft = !s || atHome ? homeLeft(sc) : s.left; });
   }
   $('#title').addEventListener('click', () => {
     driver = null;
+    atHome = true;
     main.querySelectorAll('.ledger .scroller').forEach(sc => sc.scrollTo({ left: homeLeft(sc), behavior: 'smooth' }));
   });
 
@@ -226,7 +231,7 @@
     const band = ti < 0 ? '' : `<i class="tcol" style="left:${tx - 3}px;width:${L.cell + 6}px"></i>`;
     return `<section class="card ledger" data-list="${list}" ` +
       `style="--cell:${L.cell}px;--label:${L.label}px;--gap:${GAP}px;--wgap:${WEEK_GAP}px">` +
-      `<div class="scroller">${band}${head}${body}</div>` +
+      `<div class="scroller">${band}${head}${body}</div>` + (list === 'todo' ? typingDays() : '') +
       (list === 'todo' ? '' : `<button class="addb" data-add="${list}" aria-label="Add">+</button>`) + '</section>';
   }
 
@@ -263,8 +268,41 @@
   }
 
   // The empty box: tap it (or the date of a day to come, which moves it there) and type. The words show
-  // where they'll stay, left of the box; Enter (or leaving the field) adds it, Esc drops it.
+  // where they'll stay, left of the box; Enter (or leaving the field) adds it, Esc drops it. While typing, the
+  // days under it (today, tomorrow, the rest of the week; ↑ ↓ too) move the box to another day.
   let ghostOn = null;
+  function typingDays() {
+    const now = Core.today(), on = ghostOn && ghostOn >= now ? ghostOn : now;
+    let out = '<div class="chips tdays">';
+    for (let i = 0; i < 7; i++) {
+      const d = Core.addDays(now, i);
+      out += `<button class="chip${d === on ? ' on' : ''}" data-tday="${d}">${i === 0 ? 'today' : i === 1 ? 'tomorrow' : WD[Core.weekday(d)]}</button>`;
+    }
+    return out + '</div>';
+  }
+  // The empty box to another day, keeping what's typed (nothing is drawn again)
+  function moveGhost(date) {
+    const row = main.querySelector('.lrow.ghost');
+    if (!row || date < Core.today()) return;
+    const sc = row.closest('.scroller'), days = [...sc.querySelectorAll('.lrow.head .dh')].map(d => d.dataset.day), i = days.indexOf(date);
+    if (i < 0) return;
+    const cells = [...row.querySelectorAll('.wk > .sq')], box = row.querySelector('.s-new');
+    if (cells[i] !== box) {
+      const span = document.createElement('span');
+      span.className = 'sq';
+      box.replaceWith(span);
+      cells[i].replaceWith(box);
+    }
+    box.dataset.newtodo = box.dataset.date = row.querySelector('.tdin').dataset.on = ghostOn = date;
+    row.closest('.ledger').querySelectorAll('[data-tday]').forEach(b => b.classList.toggle('on', b.dataset.tday === date));
+    const x = box.offsetLeft, lab = (shown ? shown.label : 0) + WEEK_GAP;
+    if (x - sc.scrollLeft < lab || x + box.offsetWidth - sc.scrollLeft > sc.clientWidth) {
+      const left = Math.max(0, x + box.offsetWidth + 1 - sc.clientWidth);
+      main.querySelectorAll('.ledger .scroller').forEach(s => { s.scrollLeft = left; });
+      atHome = Math.abs(left - homeLeft(sc)) < 4;
+    }
+    fade();
+  }
   function startTodo(date) {
     if (date && date !== ghostOn) { ghostOn = date; render(); }
     const f = main.querySelector('.tdin');
@@ -274,13 +312,18 @@
     const text = f.value.trim(), on = f.dataset.on;
     f.value = '';
     f.closest('.lrow').classList.remove('on');
+    f.closest('.ledger').classList.remove('typing');
     if (ghostOn) { ghostOn = null; deferred = true; }
     quiet = true;
     if (text) Store.change(Core.newTodo(text, on));
     quiet = false;
     setTimeout(() => { if (deferred && !typing() && pop.hidden) render(); }, 300);
   }
-  main.addEventListener('focusin', ev => { if (ev.target.matches('.tdin')) ev.target.closest('.lrow').classList.add('on'); });
+  main.addEventListener('focusin', ev => {
+    if (ev.target.matches('.tdin')) { ev.target.closest('.lrow').classList.add('on'); ev.target.closest('.ledger').classList.add('typing'); }
+  });
+  // a day under the field: the field keeps the focus (and the keyboard stays up)
+  main.addEventListener('pointerdown', ev => { if (ev.target.closest('[data-tday]')) ev.preventDefault(); });
 
   function box(r, c, list, color) {
     if (c.state === 'none' || c.state === 'off') return '<span class="sq"></span>';
@@ -331,6 +374,7 @@
     for (const n of notes) if (n.t) line += `<button class="nmk" style="left:${pct(toMin(n.t))}" data-note="${n.id}" data-ndate="${date}" aria-label="${n.t}"></button>`;
     const sums = [
       sleep && sleep.min ? `<span>slept ${hm(sleep.min)}</span>` : '',
+      day.steps ? `<span>${day.steps.n.toLocaleString('en-US')} steps</span>` : '',
       ...(pc.work || []).map(w => `<span><i class="cdot" style="background:${esc(w.color)}"></i>${esc(w.client)} ${hm(w.min)}</span>`),
       pc.screen ? `<span class="muted">screen ${hm(pc.screen.min)}</span>` : '',
     ].join('');
@@ -372,6 +416,10 @@
   });
   main.addEventListener('keydown', ev => {
     if (ev.target.matches('.dtext') && ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); ev.target.blur(); }
+    if (ev.target.matches('.tdin') && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) {
+      ev.preventDefault();
+      moveGhost(Core.addDays(ev.target.dataset.on, ev.key === 'ArrowDown' ? 1 : -1));
+    }
     if (ev.target.matches('.tdin') && (ev.key === 'Enter' || ev.key === 'Escape')) {
       ev.preventDefault();
       if (ev.key === 'Escape') ev.target.value = '';
@@ -662,6 +710,7 @@
     press = null;
     const ds = el.dataset;
     if (ds.todo) return el.matches('.sq') && !(ev.ctrlKey || ev.altKey || ev.metaKey) ? todoTap(el) : todoPop(el);
+    if (ds.tday) return moveGhost(ds.tday);
     if (ds.newtodo) return startTodo(ds.newtodo);
     if (ds.note) return journalPop(el, ds.ndate, ds.note);
     if (ds.id && ds.date) return ev.ctrlKey || ev.altKey || ev.metaKey ? notePop(el) : tap(el);
@@ -875,7 +924,7 @@
     const items = Store.todo().items || [];
     const todosDone = items.filter(t => t.done && t.done.slice(0, 10) >= per.a && t.done.slice(0, 10) <= per.b);
     const todosOpen = items.filter(t => !t.done && t.on <= per.b).sort((x, y) => (x.on < y.on ? -1 : x.on > y.on ? 1 : 0));
-    const out = Object.assign({}, per, { all, days, tasks, supps, todosDone, todosOpen, screen: 0, pcDays: 0, clients: {}, sleepMin: 0, nights: 0, gym: 0, notes: [], boxNotes: [] });
+    const out = Object.assign({}, per, { all, days, tasks, supps, todosDone, todosOpen, screen: 0, pcDays: 0, clients: {}, sleepMin: 0, nights: 0, gym: 0, steps: 0, stepDays: 0, notes: [], boxNotes: [] });
     for (const d of days) {
       const day = Core.dayOf(data, d) || {};
       if (day.pc) {
@@ -884,6 +933,7 @@
         for (const w of day.pc.work || []) (out.clients[w.client] = out.clients[w.client] || { min: 0, color: w.color }).min += w.min;
       }
       if (day.sleep && day.sleep.min) { out.nights++; out.sleepMin += day.sleep.min; }
+      if (day.steps) { out.stepDays++; out.steps += day.steps.n; }
       if (day.gym) out.gym++;
       for (const n of Core.dayNotes(data, d)) out.notes.push(Object.assign({ d }, n));
       for (const [kind, list] of [['tasks', cfg.tasks], ['supps', cfg.supplements]]) {
@@ -910,6 +960,7 @@
       ...clients.map(([c, v]) => `<div><b><i class="cdot" style="background:${esc(v.color)}"></i>${hm(v.min)}</b><span>${esc(c)}</span></div>`),
       st.nights ? `<div><b>${hm(st.sleepMin / st.nights)}</b><span>sleep, ${st.nights} night${st.nights > 1 ? 's' : ''}</span></div>` : '',
       st.gym ? `<div><b>${st.gym}</b><span>gym sessions</span></div>` : '',
+      st.stepDays ? `<div><b>${Math.round(st.steps / st.stepDays).toLocaleString('en-US')}</b><span>steps a day</span></div>` : '',
     ].join('');
     return `<div class="sh"><span>analysis</span><button class="x" data-close aria-label="Close">×</button></div>` +
       `<div class="aperiod">${['week', 'month', 'year'].map(k => `<button class="chip${k === cls ? ' on' : ''}" data-a="${k}">${k}</button>`).join('')}` +
@@ -939,6 +990,7 @@
     }
     if (st.nights) lines.push(`Sleep: ${hm(st.sleepMin / st.nights)} on average over ${st.nights} nights`);
     if (st.gym) lines.push(`Gym: ${st.gym} sessions`);
+    if (st.stepDays) lines.push(`Steps: ${Math.round(st.steps / st.stepDays)} a day on average over ${st.stepDays} days`);
     if (st.todosDone.length) { lines.push('', 'To-dos done:'); for (const t of st.todosDone) lines.push(`- ${pretty(t.done.slice(0, 10))}: ${t.text}`); }
     if (st.todosOpen.length) { lines.push('', 'To-dos still open:'); for (const t of st.todosOpen) lines.push(`- since ${pretty(t.on)}: ${t.text}`); }
     if (st.notes.length) { lines.push('', 'Journal:'); for (const n of st.notes) lines.push(`- ${pretty(n.d)}${n.t ? ' ' + n.t : ''}: ${n.text}`); }
@@ -974,8 +1026,10 @@
     const last = st.last ? `Last synced ${Core.hhmm(new Date(st.last))}.` : '';
     return sheetHead('Settings') +
       (Store.LOCAL ? '<p class="muted small">Local test server: no token needed, data stays on this PC.</p>' :
-        `<label>GitHub token<input id="token" type="password" autocomplete="off" value="${esc(s.token)}"></label>
-        <p class="muted small">Fine-grained, for the daily-widget repo only, Contents: read and write.
+        `<form id="tokform" onsubmit="return false"><input class="sr" autocomplete="username" value="daily-widget" tabindex="-1" aria-hidden="true">` +
+        `<label>GitHub token<input id="token" type="password" autocomplete="current-password" value="${esc(s.token)}"></label></form>
+        <p class="muted small">Fine-grained, for the daily-widget repo only, Contents: read and write. Save it in Passwords
+        (user "daily-widget") and the field fills it in after a reinstall.
         <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create one on GitHub</a></p>`) +
       `<label>This device<input id="device" value="${esc(s.device)}"></label>` +
       `<label class="check"><input type="checkbox" id="colors"${prefs.colors ? ' checked' : ''}> A color per task (off: all green)</label>` +

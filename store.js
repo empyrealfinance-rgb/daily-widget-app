@@ -64,11 +64,29 @@ const Store = (() => {
     const [root, data] = await Promise.all([call('GET', ''), call('GET', 'data')]);
     // GitHub answers "not found" for a private repo the token can't see (not "forbidden")
     if (!root) throw new Error(`This token can't see ${settings.repo}. On GitHub, give it access to that repo, with Contents: Read and write.`);
+    inbox = root.some(f => f.path === 'inbox' && f.type === 'dir');
     const wanted = [...(root || []), ...(data || [])]
       .filter(f => f.path === 'config.json' || f.path === 'todo.json' || /^data\/\d{4}-\d{2}\.json$/.test(f.path))
       .filter(f => !files[f.path] || files[f.path].sha !== f.sha);
     await Promise.all(wanted.map(f => fetchFile(f.path)));
     return wanted.length;
+  }
+
+  // The phone's Shortcut leaves what Apple Health has (steps, the night's In Bed times) in inbox/ as small
+  // text files (docs/HEALTH.md): each becomes ordinary changes to the month files, then it's removed.
+  let inbox = false;
+  async function readInbox() {
+    if (!inbox) return 0;
+    const list = (await call('GET', 'inbox')) || [];
+    let n = 0;
+    for (const f of list.filter(f => f.type === 'file' && /\.txt$/i.test(f.name))) {
+      const r = await call('GET', f.path);
+      if (r) for (const op of Core.healthOps(f.name, Core.fromB64(r.content))) { queue.push({ path: pathOf(op), op }); n++; }
+      write(KEY.queue, queue);
+      try { await call('DELETE', f.path, { message: `${settings.device}: health from the phone`, sha: f.sha, branch: 'main' }); }
+      catch (e) { if (![404, 409, 422].includes(e.status)) throw e; }   // another device got there first
+    }
+    return n;
   }
 
   function sync() {
@@ -78,7 +96,9 @@ const Store = (() => {
     syncing = (async () => {
       try {
         await flush(true);
-        if (await pull()) notify('data');
+        let got = await pull();
+        if (await readInbox()) { await flush(true); got = 1; }
+        if (got) notify('data');
         setStatus({ state: queue.length ? 'waiting' : 'ok', error: '', last: new Date() });
       } catch (e) {
         failed(e);
@@ -97,7 +117,7 @@ const Store = (() => {
   function message(ops) {
     const kinds = { task: 'tasks', note: 'notes', supp: 'supplements', suppNote: 'notes', dayNote: 'day notes', undayNote: 'day notes',
       gymDay: 'gym', gymNote: 'gym', gymEx: 'gym', status: 'archive', rename: 'names', add: 'new items', dayText: 'day note',
-      pc: 'time', sleep: 'sleep', order: 'order', todoAdd: 'to-dos', todoDone: 'to-dos', todoEdit: 'to-dos', todoDel: 'to-dos' };
+      pc: 'time', sleep: 'sleep', steps: 'health', healthSleep: 'health', order: 'order', todoAdd: 'to-dos', todoDone: 'to-dos', todoEdit: 'to-dos', todoDel: 'to-dos' };
     const what = [...new Set(ops.map(q => kinds[q.op.type] || q.op.type))].join(', ');
     const dates = [...new Set(ops.map(q => q.op.date).filter(Boolean))].sort();
     return `${settings.device}: ${what} ${dates.join(', ')}`;

@@ -62,6 +62,8 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .ledger .scroller::-webkit-scrollbar { display: none; }
 .lrow { display: flex; align-items: center; gap: var(--wgap); width: max-content; padding: 3px 0; }
 .lrow.head { padding-bottom: 6px; }
+.lrow.head .lab { margin-bottom: -6px; padding-bottom: 6px; }   /* covers the whole head row: nothing peeks out under it */
+.sr { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .lab {
   position: sticky; left: 0; z-index: 1; width: var(--label); flex: none; align-self: stretch; margin: -3px 0; padding-top: 3px; padding-bottom: 3px;
   display: flex; flex-direction: column; justify-content: center; background: var(--surface); padding-right: 6px; min-width: 0;
@@ -142,6 +144,8 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
   font-size: 14px; text-align: right; caret-color: #f0b463; overflow: hidden; text-overflow: clip;
 }
 #main .tdin:focus { outline: none; }
+.chips.tdays { display: none; margin: 6px 0 2px; }
+.ledger.typing .chips.tdays { display: flex; }
 @media (max-width: 499px) { .tdt, #main .tdin { font-size: 13.5px; } }
 
 .addb { display: block; background: none; border: 0; padding: 2px 2px 0; color: var(--faint); font-size: 18px; line-height: 1; }

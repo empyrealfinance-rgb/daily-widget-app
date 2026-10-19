@@ -239,6 +239,19 @@ var Core = (function () {
       if (op.pc) d.pc = op.pc; else delete d.pc;
     } else if (op.type === 'sleep') {
       if (op.sleep) d.sleep = op.sleep; else delete d.sleep;
+    } else if (op.type === 'steps') {
+      // Apple Health's step count for the day (the phone's Shortcut), the latest so far
+      if (op.steps) d.steps = op.steps; else delete d.steps;
+    } else if (op.type === 'healthSleep') {
+      // Apple Health's In Bed times for the night ending that day, added to what's there (a later run only
+      // adds); a night typed in from screenshots (with stages) is left as it is
+      if (!(d.sleep && d.sleep.deep != null)) {
+        var at = joinSpans(((d.sleep && d.sleep.at) || []).concat(op.at || []));
+        d.sleep = d.sleep || {};
+        d.sleep.at = at;
+        d.sleep.min = spanMinutes(at);
+        if (!d.sleep.from) d.sleep.from = 'Apple Health';
+      }
     } else if (op.type === 'dayNote') {
       // How the day went: notes with the time they're about (when written, or a moment picked on the day
       // line); "" = no time (a summary). The older single text becomes the first of them.
@@ -400,6 +413,43 @@ var Core = (function () {
 
   function stamp(d) { d = d || new Date(); return ymd(d) + ' ' + hhmm(d); }
 
+  // ---- Apple Health, from the phone's Shortcut: inbox/YYYY-MM-DD-HHMM.txt with lines like
+  //   steps 8432                                   that day's steps so far
+  //   sleep 2026-10-18 23:08 2026-10-19 02:07      a sleep interval (Mi Fitness gives In Bed times)
+  // -> 'steps' and 'healthSleep' changes. A night belongs to the day it ends on (ending after 18:00: the next
+  // day's night). Forgiving about the rest of the text: only the numbers and the times count.
+
+  function stampOf(s) { var m = /(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})/.exec(s); return m ? m[1] + ' ' + pad(+m[2]) + ':' + m[3] : null; }
+  function minutesOf(s) { return parse(s.slice(0, 10)).getTime() / 60000 + +s.slice(11, 13) * 60 + +s.slice(14, 16); }
+  function joinSpans(list) {
+    var l = list.slice().sort(function (x, y) { return x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0; }), out = [];
+    for (var i = 0; i < l.length; i++) {
+      var last = out[out.length - 1];
+      if (last && l[i][0] <= last[1]) { if (l[i][1] > last[1]) last[1] = l[i][1]; } else out.push([l[i][0], l[i][1]]);
+    }
+    return out;
+  }
+  function spanMinutes(list) { var m = 0; for (var i = 0; i < list.length; i++) m += minutesOf(list[i][1]) - minutesOf(list[i][0]); return Math.round(m); }
+
+  function healthOps(name, text) {
+    var m = /(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})/.exec(name), day = m ? m[1] : today(), at = m ? day + ' ' + m[2] + ':' + m[3] : stamp();
+    var lines = String(text || '').split(/\r?\n/), ops = [], nights = {}, i, k;
+    for (i = 0; i < lines.length; i++) {
+      var l = lines[i], times;
+      if (/^\s*steps/i.test(l)) {
+        var n = parseInt(l.replace(/\.\d+/, '').replace(/[^\d]/g, ''), 10);
+        if (!isNaN(n)) ops.push({ type: 'steps', date: day, steps: { n: n, at: at } });
+      } else if (/^\s*sleep/i.test(l) && (times = l.match(/\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}/g)) && times.length >= 2) {
+        var a = stampOf(times[0]), b = stampOf(times[1]);
+        if (!(a < b)) continue;
+        k = +b.slice(11, 13) >= 18 ? addDays(b.slice(0, 10), 1) : b.slice(0, 10);
+        (nights[k] = nights[k] || []).push([a, b]);
+      }
+    }
+    for (k in nights) if (nights.hasOwnProperty(k)) ops.push({ type: 'healthSleep', date: k, at: joinSpans(nights[k]) });
+    return ops;
+  }
+
   // ---- Files: readable JSON, days in order, short arrays and objects on one line
 
   function serialize(m) {
@@ -441,7 +491,7 @@ var Core = (function () {
     hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, isSet: isSet, apply: apply, dayText: dayText,
     dayNotes: dayNotes, isConfigOp: isConfigOp, newItem: newItem, moveOp: moveOp, applyConfig: applyConfig,
     isTodoOp: isTodoOp, applyTodo: applyTodo, newTodo: newTodo, todosShown: todosShown, stamp: stamp,
-    serializeTodo: serializeTodo,
+    serializeTodo: serializeTodo, healthOps: healthOps, joinSpans: joinSpans,
     serialize: serialize, serializeConfig: serializeConfig, toB64: toB64, fromB64: fromB64, newId: newId
   };
 })();
