@@ -476,6 +476,19 @@ var Core = (function () {
     for (var i = 0; i < l.length; i++) if (!isNaN(n = count(l[i])) && !(n <= best)) best = n;
     return best;
   }
+  // The dates of the times in s as written (the phone's own day, whatever this device's time zone)
+  function phoneDays(s) {
+    var out = [], m;
+    WHEN.lastIndex = 0;
+    while ((m = WHEN.exec(s))) out.push(m[1]);
+    return out;
+  }
+  // The count on each line that has one
+  function lineCounts(s) {
+    var l = String(s).split(/[\r\n]+/), out = [], n;
+    for (var i = 0; i < l.length; i++) if (!isNaN(n = count(l[i]))) out.push(n);
+    return out;
+  }
   function stampOf(s) { var w = whens(s); return w.length ? w[0] : null; }
   function minutesOf(s) { return parse(s.slice(0, 10)).getTime() / 60000 + +s.slice(11, 13) * 60 + +s.slice(14, 16); }
   function joinSpans(list) {
@@ -527,9 +540,14 @@ var Core = (function () {
     while ((e = re.exec(s))) {
       var kind = e[1].toLowerCase(), times = whens(e[2]), rest = e[2].replace(WHEN, ' ');
       if (kind === 'steps') {
-        // "steps 1318" counts for the file's day; "steps 2026-10-18T00:00:00+02:00 9234" for that day
-        k = times.length ? times[0].slice(0, 10) : day;
-        if (!isNaN(n = times.length ? count(rest) : bigCount(rest)) && !(n <= steps[k])) steps[k] = n;
+        // "steps 1318": the file's day (the biggest number; the phone adds a "0" line). With dates, a day each, the
+        // date as the phone wrote it: "steps 2026-10-18T00:00:00+02:00 9234", or the samples' days and then their
+        // counts, a line each in the same order ("steps 2026-10-18T…\n2026-10-19T… 9234\n1318"). A 0 is no count.
+        var days = phoneDays(e[2]), nums = lineCounts(rest), j;
+        if (!days.length) { n = bigCount(rest); if (n > 0 && !(n <= steps[day])) steps[day] = n; }
+        else if (nums.length === days.length || days.length === 1) {
+          for (j = 0; j < days.length && j < nums.length; j++) if ((n = nums[j]) > 0 && !(n <= steps[days[j]])) steps[days[j]] = n;
+        }
       } else if (kind === 'sleep') {
         if (times.length < 2 || !(times[0] < times[1])) continue;
         k = +times[1].slice(11, 13) >= 18 ? addDays(times[1].slice(0, 10), 1) : times[1].slice(0, 10);
