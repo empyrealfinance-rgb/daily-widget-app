@@ -116,6 +116,7 @@ var Core = (function () {
     if (date > now) return done ? 'done' : 'future';
     if (task.kind === 'record') return !done ? 'open' : date < now && broken(task, data, date, config) ? 'flag' : 'done';
     if (done) return 'done';
+    if (task.kind === 'cardio' && cardioMin(task, (dayOf(data, date) || {}).heart) == null) return date === now ? 'todo' : 'open';
     if (before || task.kind === 'gym' || task.must === false) return date === now ? 'todo' : 'open';
     if (w[0] !== w[1]) {
       // A window of several days (24h fast, month end): done once anywhere in it is enough.
@@ -140,11 +141,13 @@ var Core = (function () {
     return n;
   }
 
-  // cardio: the minutes that day at or above its bpm (Apple Health's heart rate, in steps of 10 bpm)
+  // cardio: the minutes that day at or above its bpm (Apple Health's heart rate, in steps of 10 bpm); null when
+  // the day's heart rate is only a low and a high per hour (Mi Fitness): no minutes to count
   var HR_FROM = 80, HR_TO = 190;
   function cardioMin(task, heart) {
+    if (!heart || !heart.min) return null;
     var b = Math.max(HR_FROM, Math.min(HR_TO, Math.floor(((task && task.bpm) || 110) / 10) * 10));
-    return (heart && heart.min && heart.min[b]) || 0;
+    return heart.min[b] || 0;
   }
   function cardioTask(config) {
     var l = (config && config.tasks) || [];
@@ -158,8 +161,8 @@ var Core = (function () {
     now = now || today();
     if (task.kind === 'gym') return weekCount(task, data, now) + '/' + task.perWeek;
     if (task.kind === 'cardio') {
-      var hd = dayOf(data, now);
-      return hd && hd.heart ? cardioMin(task, hd.heart) + '/' + (task.min || 30) + ' min' : '';
+      var hd = dayOf(data, now), cm = hd && cardioMin(task, hd.heart);
+      return cm != null ? cm + '/' + (task.min || 30) + ' min' : hd && hd.heart && hd.heart.max ? 'top ' + hd.heart.max : '';
     }
     if (task.kind === 'weekly' && task.weeks > 1 && task.from) {
       var every = 7 * task.weeks, k = diffDays(task.from, now), n = k < 0 ? -k : (every - k % every) % every;
@@ -261,9 +264,10 @@ var Core = (function () {
       if (op.steps) d.steps = op.steps; else delete d.steps;
     } else if (op.type === 'heart') {
       // Apple Health's heart rate that day, summed up (healthOps); a count from as many samples or more replaces it
-      // (a later run sees the whole day; one that only reached the day's end doesn't undo it)
+      // (a later run sees the whole day; one that only reached the day's end doesn't undo it). One from before the
+      // hours were kept (no hours) always gives way.
       if (!op.heart) delete d.heart;
-      else if (!d.heart || op.heart.n >= (d.heart.n || 0)) d.heart = op.heart;
+      else if (!d.heart || !d.heart.hours || op.heart.n >= (d.heart.n || 0)) d.heart = op.heart;
     } else if (op.type === 'healthSleep') {
       // Apple Health's In Bed times for the night ending that day, added to what's there (a later run only
       // adds); a night typed in from screenshots (with stages) is left as it is
@@ -460,9 +464,15 @@ var Core = (function () {
   }
   // A count as the phone writes it: "8432", "8,432", "8 432", "8432.6", "8 432,6" -> 8432
   function count(s) {
-    var m = /\d[\d\s.,\u00a0\u202f]*/.exec(s);
+    var m = /\d[\d .,\u00a0\u202f]*/.exec(s);
     if (!m) return NaN;
-    return parseInt(m[0].replace(/[\s\u00a0\u202f]+$/, '').replace(/[.,]\d{1,2}$/, '').replace(/\D/g, ''), 10);
+    return parseInt(m[0].replace(/[ \u00a0\u202f]+$/, '').replace(/[.,]\d{1,2}$/, '').replace(/\D/g, ''), 10);
+  }
+  // The biggest count on any of the lines (the phone may add a "0" line under the steps)
+  function bigCount(s) {
+    var l = String(s).split(/[\r\n]+/), best = NaN, n;
+    for (var i = 0; i < l.length; i++) if (!isNaN(n = count(l[i])) && !(n <= best)) best = n;
+    return best;
   }
   function stampOf(s) { var w = whens(s); return w.length ? w[0] : null; }
   function minutesOf(s) { return parse(s.slice(0, 10)).getTime() / 60000 + +s.slice(11, 13) * 60 + +s.slice(14, 16); }
@@ -476,16 +486,26 @@ var Core = (function () {
   }
   function spanMinutes(list) { var m = 0; for (var i = 0; i < list.length; i++) m += minutesOf(list[i][1]) - minutesOf(list[i][0]); return Math.round(m); }
 
-  // One day's heart rate samples [minutes, bpm] -> { min: { 80: …, 90: …, … }: minutes at or above each bpm (a
-  // sample counts till the next one, 5 minutes at most), max, n (samples), cardio: the stretches at or above the
-  // cardio box's bpm, "17:02-17:48 …" (as the time tracker's), from, at }
-  function heartDay(list, date, bpm, at) {
+  // One day's heart rate samples [minutes, bpm], repeats dropped (Mi Fitness writes the same ones on every sync) ->
+  // { hours: { "13": [89, 126], … }: the lowest and highest each hour, max, n (samples), from, at }. When they're
+  // readings through the day (not just a low and a high on each hour, which is all Mi Fitness gives Health), also
+  // min: { 80: …, 90: …, … }: minutes at or above each bpm (a sample counts till the next one, 5 minutes at most),
+  // and cardio: the stretches at or above the cardio box's bpm, "17:02-17:48 …" (as the time tracker's).
+  function heartDay(samples, date, bpm, at) {
+    var seen = {}, list = [], hours = {}, onHour = 0, min = {}, max = 0, spans = [], base = parse(date).getTime() / 60000, cardio = [], b, i, h;
+    for (i = 0; i < samples.length; i++) if (!seen[samples[i].join(' ')]) { seen[samples[i].join(' ')] = 1; list.push(samples[i]); }
     list.sort(function (x, y) { return x[0] - y[0]; });
-    var min = {}, max = 0, spans = [], base = parse(date).getTime() / 60000, cardio = [], b, i;
+    for (i = 0; i < list.length; i++) {
+      h = String(Math.floor((list[i][0] - base) / 60));
+      hours[h] = hours[h] ? [Math.min(hours[h][0], list[i][1]), Math.max(hours[h][1], list[i][1])] : [list[i][1], list[i][1]];
+      if ((list[i][0] - base) % 60 === 0) onHour++;
+      if (list[i][1] > max) max = list[i][1];
+    }
+    var out = { hours: hours, max: max, n: list.length, from: 'Apple Health', at: at };
+    if (onHour * 2 >= list.length) return out;
     for (i = 0; i < list.length; i++) {
       var t = list[i][0], v = list[i][1], dur = i + 1 < list.length ? Math.min(5, list[i + 1][0] - t) : 1;
       for (b = HR_FROM; b <= HR_TO && v >= b; b += 10) min[b] = (min[b] || 0) + dur;
-      if (v > max) max = v;
       if (v >= bpm) {
         var last = spans[spans.length - 1], x = t - base, y = x + Math.max(dur, 1);
         if (last && x <= last[1] + 2) last[1] = Math.max(last[1], y); else spans.push([x, y]);
@@ -494,7 +514,9 @@ var Core = (function () {
     for (b in min) if (min.hasOwnProperty(b)) { min[b] = Math.round(min[b]); if (!min[b]) delete min[b]; }
     function hm(x) { x = Math.max(0, Math.min(1439, Math.round(x))); return pad(Math.floor(x / 60)) + ':' + pad(x % 60); }
     for (i = 0; i < spans.length; i++) if (spans[i][1] - spans[i][0] >= 2) cardio.push(hm(spans[i][0]) + '-' + hm(spans[i][1]));
-    return { min: min, max: max, n: list.length, cardio: cardio.join(' '), from: 'Apple Health', at: at };
+    out.min = min;
+    out.cardio = cardio.join(' ');
+    return out;
   }
 
   function healthOps(name, text, config) {
@@ -503,7 +525,7 @@ var Core = (function () {
     while ((e = re.exec(s))) {
       var kind = e[1].toLowerCase(), times = whens(e[2]), rest = e[2].replace(WHEN, ' ');
       if (kind === 'steps') {
-        if (!isNaN(n = count(rest))) ops.push({ type: 'steps', date: day, steps: { n: n, at: at } });
+        if (!isNaN(n = bigCount(rest))) ops.push({ type: 'steps', date: day, steps: { n: n, at: at } });
       } else if (kind === 'sleep') {
         if (times.length < 2 || !(times[0] < times[1])) continue;
         k = +times[1].slice(11, 13) >= 18 ? addDays(times[1].slice(0, 10), 1) : times[1].slice(0, 10);

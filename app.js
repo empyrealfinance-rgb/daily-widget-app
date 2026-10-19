@@ -366,6 +366,12 @@
     return out;
   }
 
+  // The day's heart rate as its lowest and highest ("pulse 44–152")
+  function pulse(heart) {
+    const v = Object.values(heart.hours || {});
+    return v.length ? `<span>pulse ${Math.min(...v.map(x => x[0]))}–${Math.max(...v.map(x => x[1]))}</span>` : '';
+  }
+
   function todayCard(data, date) {
     const day = Core.dayOf(data, date) || {}, pc = day.pc || {}, sl = sleepOn(data, date), sleep = day.sleep;
     const ct = Core.cardioTask(Store.config()), heart = day.heart;
@@ -378,6 +384,10 @@
     for (const [a, b] of spansOf(pc.screen && pc.screen.at)) line += bar(a, b, 'scr');
     for (const w of pc.work || []) for (const [a, b] of spansOf(w.at)) line += bar(a, b, 'wk', w.color);
     for (const [a, b] of spansOf(heart && heart.cardio)) line += bar(a, b, 'cd', ct && ct.color);
+    // only a low and a high per hour (Mi Fitness): the hours whose high reached the cardio bpm, fainter
+    if (heart && heart.hours && !heart.min) {
+      for (const h in heart.hours) if (heart.hours[h][1] >= ((ct && ct.bpm) || 110)) line += bar(h * 60, h * 60 + 60, 'cd hr', ct && ct.color);
+    }
     const mark = (m, real) => `<span class="mk${real ? ' real' : ''}" style="left:${pct(m)}"><b>${hm(m % 1440)}</b></span>`;
     if (nowMin != null) line += `<i class="now" style="left:${pct(nowMin)}"></i>`;
     const notes = Core.dayNotes(data, date);
@@ -385,7 +395,7 @@
     const sums = [
       sleep && sleep.min ? `<span>slept ${hm(sleep.min)}</span>` : '',
       day.steps ? `<span>${day.steps.n.toLocaleString('en-US')} steps</span>` : '',
-      heart ? `<span>cardio ${Core.cardioMin(ct, heart)} min</span>` : '',
+      heart ? (Core.cardioMin(ct, heart) != null ? `<span>cardio ${Core.cardioMin(ct, heart)} min</span>` : pulse(heart)) : '',
       ...(pc.work || []).map(w => `<span><i class="cdot" style="background:${esc(w.color)}"></i>${esc(w.client)} ${hm(w.min)}</span>`),
       pc.screen ? `<span class="muted">screen ${hm(pc.screen.min)}</span>` : '',
     ].join('');
@@ -978,7 +988,7 @@
       }
       if (day.sleep && day.sleep.min) { out.nights++; out.sleepMin += day.sleep.min; }
       if (day.steps) { out.stepDays++; out.steps += day.steps.n; }
-      if (day.heart) { out.heartDays++; out.cardio += Core.cardioMin(ct, day.heart); }
+      if (day.heart && Core.cardioMin(ct, day.heart) != null) { out.heartDays++; out.cardio += Core.cardioMin(ct, day.heart); }
       if (day.gym) out.gym++;
       for (const n of Core.dayNotes(data, d)) out.notes.push(Object.assign({ d }, n));
       for (const [kind, list] of [['tasks', cfg.tasks], ['supps', cfg.supplements]]) {
