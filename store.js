@@ -66,7 +66,7 @@ const Store = (() => {
     if (!root) throw new Error(`This token can't see ${settings.repo}. On GitHub, give it access to that repo, with Contents: Read and write.`);
     inbox = root.some(f => f.path === 'inbox' && f.type === 'dir');
     const wanted = [...(root || []), ...(data || [])]
-      .filter(f => f.path === 'config.json' || f.path === 'todo.json' || /^data\/\d{4}-\d{2}\.json$/.test(f.path))
+      .filter(f => f.path === 'config.json' || f.path === 'todo.json' || f.path === 'gym.json' || /^data\/\d{4}-\d{2}\.json$/.test(f.path))
       .filter(f => !files[f.path] || files[f.path].sha !== f.sha);
     await Promise.all(wanted.map(f => fetchFile(f.path)));
     return wanted.length;
@@ -199,6 +199,11 @@ const Store = (() => {
     return views().config;
   }
 
+  // gym.json: the exercises (the gym chat keeps it; the app only reads it)
+  function gym() {
+    return (files['gym.json'] && files['gym.json'].json) || { exercises: [] };
+  }
+
   // todo.json, waiting changes included
   function todo() {
     return views().todo;
@@ -245,7 +250,7 @@ const Store = (() => {
   });
 
   return {
-    LOCAL, settings, ready, sync, flush, change, config, data, todo, setSettings,
+    LOCAL, settings, ready, sync, flush, change, config, data, todo, gym, setSettings,
     status: () => status,
     waiting: () => queue.length,
     onChange: f => listeners.push(f),

@@ -280,10 +280,16 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
   display: block; width: 100%; text-align: left; background: var(--surface2); border: 0;
   border-radius: 12px; padding: 12px 14px; margin-bottom: 8px;
 }
-.exrow small, .pick small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
-.pick { display: block; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); padding: 11px 0; }
-.pick.new { color: var(--accent); }
-.pick .badge { color: #5DCAA5; font-size: 12px; margin-left: 6px; }
+.exrow small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+#sheet.top { align-items: flex-start; }
+#sheet.top .panel { border-radius: 0 0 16px 16px; padding-top: calc(env(safe-area-inset-top) + 12px); padding-bottom: 16px; }
+.pks { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.pk { background: var(--surface2); border: 1px solid var(--line); border-radius: 10px; padding: 9px 13px; font-size: 15px; color: var(--text); }
+.pk.done { border-color: #3d7a63; }
+.pk.new { color: var(--accent); background: none; }
+.pkh { font-size: 12px; color: var(--muted); margin-top: 14px; }
+.pkh + .pks { margin-top: 6px; }
+.how { color: var(--text); margin: 0 0 6px; }
 .sets { list-style: none; padding: 0; margin: 12px 0; }
 .sets li {
   display: flex; align-items: center; justify-content: space-between;

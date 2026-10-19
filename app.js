@@ -742,7 +742,11 @@
     renderSheet();
     requestAnimationFrame(() => sheetEl.classList.add('show'));
   }
-  function renderSheet() { if (sheetRender) sheetEl.innerHTML = `<div class="panel${sheetWide ? ' wide' : ''}">${sheetRender()}</div>`; }
+  function renderSheet() {
+    if (!sheetRender) return;
+    sheetEl.innerHTML = `<div class="panel${sheetWide ? ' wide' : ''}">${sheetRender()}</div>`;
+    sheetEl.classList.toggle('top', sheetRender === gymView && gym.picking && !gym.ex);     // picking an exercise: up top
+  }
   function closeSheet() {
     sheetEl.classList.remove('show');
     sheetEl.hidden = true;
@@ -755,7 +759,7 @@
   // ---- Gym: the day's exercises; pick one (recent first), last time's sets prefilled, add sets
 
   const kgText = k => (k == null ? 'BW' : String(k));
-  const parseKg = s => { s = String(s).trim().replace(',', '.'); const n = parseFloat(s); return s === '' || isNaN(n) ? null : n; };
+  const parseKg = s => { s = String(s).trim().replace(',', '.'); const n = parseFloat(s); return s === '' || isNaN(n) || n <= 0 ? null : n; };
   // "45 × 10, 10, 8 · 47.5 × 8": consecutive sets with the same weight share it, like the Telegram notes
   function fmtSets(sets) {
     const groups = [];
@@ -784,18 +788,10 @@
     return out;
   }
   const previous = (name, date) => (gymHistory()[name] || []).filter(x => x.date < date).pop() || null;
-  // The exercise that came after this one the last time it was done, and isn't in this day's yet: "next"
-  function nextEx(name, date) {
-    const data = Store.data(), done = ((gymDay(date) || {}).ex || []).map(e => e.name), days = [];
-    for (const m of Object.keys(data)) for (const d of Object.keys(data[m].days || {})) if (d < date) days.push(d);
-    for (const d of days.sort().reverse()) {
-      const names = ((gymDay(d) || {}).ex || []).map(e => e.name), i = names.indexOf(name);
-      if (i < 0) continue;
-      const after = names.slice(i + 1).find(n => !done.includes(n));
-      if (after) return after;
-    }
-    return null;
-  }
+  // gym.json: the exercises, with other names to find them by (also), size or support (group), done with your
+  // body weight (body: its kg is what you weigh, so the next set keeps today's), a line on how (how)
+  const exInfo = name => (Store.gym().exercises || []).find(e => e.name === name) || null;
+  const exFits = (name, q) => [name, ...((exInfo(name) || {}).also || [])].some(n => n.toLowerCase().includes(q));
   const gymDay = d => (Core.dayOf(Store.data(), d) || {}).gym || null;
   const exOf = (d, name) => ((gymDay(d) || {}).ex || []).find(e => e.name === name) || null;
 
@@ -810,6 +806,9 @@
       (!g ? '<button class="btn wide" data-g="went">Went, no details</button>' : !ex.length ? '<button class="btn wide" data-g="notgym">Not a gym day</button>' : '');
   }
 
+  // Picking one: the sheet sits at the top of the screen, so the keyboard never covers the list; the search, then
+  // the exercises as buttons, just names, the latest first: size, then support. Exercises only in the history
+  // (an old gym's machines) show when the search finds them.
   function pickerView() {
     return `<div class="row"><button class="back" data-g="back" aria-label="Back">‹</button>` +
       `<input id="search" aria-label="Find or add an exercise" autocomplete="off" autocapitalize="off" value="${esc(gym.search)}"></div>` +
@@ -817,31 +816,47 @@
   }
 
   function pickList() {
-    const hist = gymHistory(), q = gym.search.trim().toLowerCase();
-    const list = Object.keys(hist).map(name => {
-      const before = hist[name].filter(x => x.date < gym.date).pop();
-      return { name, last: before || hist[name][hist[name].length - 1], today: hist[name].some(x => x.date === gym.date) };
-    }).sort((a, b) => (a.last.date < b.last.date ? 1 : a.last.date > b.last.date ? -1 : 0));
-    const shown = q ? list.filter(e => e.name.includes(q)) : list;
-    const add = q && !list.some(e => e.name === q) ? `<button class="pick new" data-pick="${esc(q)}">+ add “${esc(q)}”</button>` : '';
-    return add + shown.map(e => `<button class="pick" data-pick="${esc(e.name)}">${esc(e.name)}${e.today ? '<span class="badge">today</span>' : ''}` +
-      `<small>${rel(e.last.date)} · ${esc(fmtSets(e.last.sets))}</small></button>`).join('');
+    const hist = gymHistory(), q = gym.search.trim().toLowerCase(), cat = Store.gym().exercises || [];
+    const last = n => (hist[n] ? hist[n][hist[n].length - 1].date : '');
+    const names = [...new Set([...cat.map(e => e.name), ...(q ? Object.keys(hist) : [])])]
+      .filter(n => !q || exFits(n, q))
+      .sort((a, b) => (last(a) < last(b) ? 1 : last(a) > last(b) ? -1 : 0));
+    const today = n => (hist[n] || []).some(x => x.date === gym.date);
+    const btn = n => `<button class="pk${today(n) ? ' done' : ''}" data-pick="${esc(n)}">${esc(n)}</button>`;
+    const group = g => names.filter(n => ((exInfo(n) || {}).group || 'size') === g);
+    const add = q && !names.includes(q) ? `<button class="pk new" data-pick="${esc(q)}">+ ${esc(q)}</button>` : '';
+    return (group('size').length ? `<div class="pkh">size</div><div class="pks">${group('size').map(btn).join('')}</div>` : '') +
+      (group('support').length ? `<div class="pkh">support</div><div class="pks">${group('support').map(btn).join('')}</div>` : '') +
+      (add ? `<div class="pks">${add}</div>` : '');
   }
 
-  // Next set: the same set from last time, else today's last set, else last time's last set
-  function prefill(sets, prev) {
+  // Next set: the same set from last time, else today's last set, else last time's last set. Done with your body
+  // weight (pull-ups): the weight is today's, or the latest written down; it doesn't change between sets.
+  function prefill(name, sets, prev) {
     const i = sets.length;
-    if (prev && prev.sets[i]) return prev.sets[i];
-    if (sets.length) return sets[sets.length - 1];
-    if (prev && prev.sets.length) return prev.sets[prev.sets.length - 1];
-    return [null, 10];
+    let s = (prev && prev.sets[i]) || sets[sets.length - 1] || (prev && prev.sets[prev.sets.length - 1]) || [null, 10];
+    if ((exInfo(name) || {}).body) s = [sets.length ? sets[sets.length - 1][0] : bodyWeight(gym.date), s[1]];
+    return s;
+  }
+  // The latest body weight written down (as the kg of an exercise done with it) before date
+  function bodyWeight(date) {
+    let best = null;
+    for (const [name, list] of Object.entries(gymHistory())) {
+      if (!(exInfo(name) || {}).body) continue;
+      for (const x of list) {
+        const k = x.sets.map(s => s[0]).filter(k => k > 0).pop();
+        if (x.date < date && k != null && (!best || x.date > best.date)) best = { date: x.date, k };
+      }
+    }
+    return best ? best.k : null;
   }
 
   function exerciseView() {
     const e = exOf(gym.date, gym.ex), sets = (e && e.sets) || [], prev = previous(gym.ex, gym.date);
-    const next = gym.next || prefill(sets, prev);
+    const next = gym.next || prefill(gym.ex, sets, prev), how = (exInfo(gym.ex) || {}).how;
     return `<div class="row"><button class="back" data-g="back" aria-label="Back">‹</button><h3 class="grow">${esc(gym.ex)}</h3>` +
       `<button class="x" data-close aria-label="Close">×</button></div>` +
+      (how ? `<p class="small how">${esc(how)}</p>` : '') +
       `<p class="muted small">${prev ? `last time, ${rel(prev.date)}: ${esc(fmtSets(prev.sets))}${prev.note ? ' · ' + esc(prev.note) : ''}` : 'first time'}</p>` +
       `<ol class="sets">${sets.map((s, i) => `<li><span><span class="n">${i + 1}</span>${kgText(s[0])} × ${s[1] ?? '?'}</span>` +
         `<button class="del${gym.armed === i ? ' armed' : ''}" data-del="${i}">${gym.armed === i ? 'delete?' : '✕'}</button></li>`).join('')}</ol>` +
@@ -852,22 +867,14 @@
         `<input id="reps" inputmode="numeric" value="${next[1] ?? ''}"><button data-step="reps,1">+</button></div></div>
       </div>` +
       `<button class="btn wide primary big" data-g="addset">Add set ${sets.length + 1}</button>` +
-      (sets.length ? nextButton() : '') +
       (sets.length ? `<label>note<input id="exnote" value="${esc(e.note)}"></label>` : '');
-  }
-  // After a set: on to the next exercise (what followed this one last time), or to the list to pick one
-  function nextButton() {
-    const n = nextEx(gym.ex, gym.date);
-    return n ? `<button class="btn wide" data-next="${esc(n)}">next: ${esc(n)} ›</button>` : '<button class="btn wide" data-next="">next exercise ›</button>';
   }
 
   function step(field, dir) {
     const el = $('#' + field);
     if (field === 'kg') {
-      // 2.5 kg a step; going down (or up from assisted) stops at bodyweight on the way: BW, not 0 or past it
-      const was = parseKg(el.value) ?? 0;
-      let k = Math.round((was + dir * 2.5) * 100) / 100;
-      if ((was > 0 && k < 0) || (was < 0 && k > 0)) k = 0;
+      // 2.5 kg a step, down to BW (no weight) and no further
+      const k = Math.max(0, Math.round(((parseKg(el.value) ?? 0) + dir * 2.5) * 100) / 100);
       el.value = kgText(k === 0 ? null : k);
     }
     else el.value = Math.max(0, (parseInt(el.value, 10) || 0) + dir);
@@ -902,14 +909,9 @@
     if (ds.pick) { gym.ex = ds.pick.trim().toLowerCase(); gym.picking = false; gym.search = ''; gym.next = null; gym.armed = -1; return renderSheet(); }
     if (ds.step) { const [f, dir] = ds.step.split(','); return step(f, +dir); }
     if ('bw' in ds) { $('#kg').value = 'BW'; gym.next = [null, parseInt($('#reps').value, 10)]; return; }
-    if ('next' in ds) {
-      Object.assign(gym, { ex: ds.next || null, picking: !ds.next, search: '', next: null, armed: -1 });
-      renderSheet();
-      return !ds.next && $('#search') && $('#search').focus();
-    }
     if (ds.del) return deleteSet(+ds.del);
     switch (ds.g) {
-      case 'pick': gym.picking = true; gym.search = ''; renderSheet(); return $('#search') && $('#search').focus();
+      case 'pick': gym.picking = true; gym.search = ''; return renderSheet();
       case 'back': if (gym.ex) gym.ex = null; else gym.picking = false; gym.next = null; return renderSheet();
       case 'addset': return addSet();
       case 'went': Store.change({ type: 'gymDay', date: gym.date, on: true }); return renderSheet();
@@ -1124,7 +1126,7 @@
     if (ev.key === 'Escape') return closeSheet();
     if (ev.key !== 'Enter') return;
     const id = ev.target.id;
-    if (id === 'search' && gym.search.trim()) { const first = $('#picklist [data-pick]'); if (first) first.click(); }
+    if (id === 'search' && gym.search.trim()) { const first = $('#picklist .pk:not(.new)') || $('#picklist .pk.new'); if (first) first.click(); }
     else if (id === 'kg' || id === 'reps') addSet();
     else if (id === 'gnote' || id === 'exnote') ev.target.blur();
   });
