@@ -58,8 +58,13 @@
     const scroll = scrollState();
     const tasks = Core.rows(cfg, data, dates, now).filter(r => r.cells.some(c => c.state !== 'none' && c.state !== 'off'));
     const supps = Core.suppRows(cfg, data, dates, now);
-    main.innerHTML = ledger('todo', todos, dates, L) + ledger('tasks', tasks, dates, L) + (supps.length ? ledger('supps', supps, dates, L) : '') +
-      todayCard(data, now);
+    const health = healthRows(data, dates, now);
+    const cards = {
+      todo: ledger('todo', todos, dates, L), tasks: ledger('tasks', tasks, dates, L),
+      supps: supps.length ? ledger('supps', supps, dates, L) : '', health: health.length ? ledger('health', health, dates, L) : '',
+      today: todayCard(data, now),
+    };
+    main.innerHTML = cardOrder().map(k => cards[k]).join('');
     restoreScroll(scroll);
     homeKeeper.disconnect();
     main.querySelectorAll('.ledger .scroller').forEach(sc => homeKeeper.observe(sc));
@@ -221,12 +226,15 @@
   function ledger(list, rows, dates, L) {
     const now = Core.today(), weeks = [];
     for (let i = 0; i < dates.length; i += 7) weeks.push(dates.slice(i, i + 7));
-    const head = `<div class="lrow head"><div class="lab"><span class="title">${{ todo: 'to-do', tasks: 'tasks', supps: 'supplements' }[list]}</span></div>` +
+    const head = `<div class="lrow head"><div class="lab"><span class="title grip">${{ todo: 'to-do', tasks: 'tasks', supps: 'supplements', health: 'health' }[list]}</span></div>` +
       weeks.map(w => `<div class="wk">${w.map((d, i) => {
         const n = +d.slice(8), lbl = n === 1 ? MONTHS[+d.slice(5, 7) - 1] : n;
         return `<button class="dh${d === now ? ' today' : ''}${n === 1 ? ' m1' : ''}" data-day="${d}" title="${pretty(d)}"><span>${'MTWTFSS'[i]}</span>${lbl}</button>`;
       }).join('')}</div>`).join('') + '</div>';
-    const body = list === 'todo' ? todoRows(rows, weeks, dates, L) : rows.map(r => {
+    const body = list === 'todo' ? todoRows(rows, weeks, dates, L) : list === 'health' ? rows.map(r =>
+      `<div class="lrow"><div class="lab"><span class="name"><i style="background:${r.color}"></i><span class="n">${r.name}</span>` +
+      `${r.hint ? `<span class="hint">${r.hint}</span>` : ''}</span></div>` +
+      weeks.map(w => `<div class="wk">${w.map(d => metric(r, d)).join('')}</div>`).join('') + '</div>').join('') : rows.map(r => {
       const c = colorOf(r);
       return `<div class="lrow"><div class="lab"><button class="name" data-info="${r.id}" data-list="${list}">` +
         (prefs.colors && r.color ? `<i style="background:${c}"></i>` : '') +
@@ -237,11 +245,95 @@
     // today's column: a warm band behind it, fading out at its ends
     const ti = dates.indexOf(now), tx = L.label + WEEK_GAP + Math.floor(ti / 7) * (7 * L.cell + 6 * GAP + WEEK_GAP) + (ti % 7) * (L.cell + GAP);
     const band = ti < 0 ? '' : `<i class="tcol" style="left:${tx - 3}px;width:${L.cell + 6}px"></i>`;
-    return `<section class="card ledger" data-list="${list}" ` +
+    return `<section class="card ledger" data-list="${list}" data-card="${list}" ` +
       `style="--cell:${L.cell}px;--label:${L.label}px;--gap:${GAP}px;--wgap:${WEEK_GAP}px">` +
       `<div class="scroller">${band}${head}${body}</div>` + (list === 'todo' ? typingDays() : '') +
-      (list === 'todo' ? '' : `<button class="addb" data-add="${list}" aria-label="Add">+</button>`) + '</section>';
+      (list === 'todo' || list === 'health' ? '' : `<button class="addb" data-add="${list}" aria-label="Add">+</button>`) + '</section>';
   }
+
+  // ---- Health: Apple Health's steps and the nights' sleep, a value a day (docs/HEALTH.md); a row shows once it
+  // has a day. Beside the name, the last 7 days' average.
+  const STEPS = '#6cb4c4', SLEEP = '#8e8bd6';
+  function healthRows(data, dates, now) {
+    const steps = {}, sleep = {};
+    for (const d of dates) {
+      const day = Core.dayOf(data, d);
+      if (day && day.steps) steps[d] = day.steps.n;
+      if (day && day.sleep && day.sleep.min) sleep[d] = day.sleep.min;
+    }
+    const avg = (vals, fmt) => {
+      const l = [];
+      for (let i = 0; i < 7; i++) { const v = vals[Core.addDays(now, -i)]; if (v != null) l.push(v); }
+      return l.length ? 'avg ' + fmt(Math.round(l.reduce((a, b) => a + b, 0) / l.length)) : '';
+    };
+    const out = [];
+    if (Object.keys(steps).length) out.push({ name: 'steps', color: STEPS, vals: steps, full: 10000, fmt: kSteps, hint: avg(steps, kSteps) });
+    if (Object.keys(sleep).length) out.push({ name: 'sleep', color: SLEEP, vals: sleep, full: 480, fmt: hm, hint: avg(sleep, hm) });
+    return out;
+  }
+  const kSteps = n => (n < 1000 ? String(Math.round(n)) : n < 9950 ? (n / 1000).toFixed(1) + 'k' : Math.round(n / 1000) + 'k');
+  // One day's value: a number (a), a bar rising with it (b), or a box tinted by it with the number (c); full at
+  // 10k steps / 8 hours
+  function metric(r, d) {
+    const v = r.vals[d];
+    if (v == null) return `<span class="sq mv" data-date="${d}"></span>`;
+    const k = Math.min(1, v / r.full), look = prefs.look || 'a', t = `title="${pretty(d)}: ${r.fmt(v)}"`;
+    if (look === 'b') return `<span class="sq mb" data-date="${d}" ${t}><i style="height:${Math.max(8, k * 100)}%;background:${r.color}"></i></span>`;
+    if (look === 'c') {
+      const [x, y, z] = [1, 3, 5].map(i => parseInt(r.color.slice(i, i + 2), 16));
+      return `<span class="sq mt" data-date="${d}" ${t} style="background:rgba(${x},${y},${z},${(0.12 + 0.7 * k).toFixed(2)})">${r.fmt(v)}</span>`;
+    }
+    return `<span class="sq mv${k >= 1 ? ' full' : ''}" data-date="${d}" ${t} style="--c:${r.color}">${r.fmt(v)}</span>`;
+  }
+
+  // ---- Moving the cards: hold a card's title for half a second, then drag it up or down. The order is kept on
+  // this device (prefs.cards); a card added later goes to the end.
+  const CARDS = ['todo', 'tasks', 'supps', 'health', 'today'];
+  function cardOrder() {
+    const o = (prefs.cards || []).filter(k => CARDS.includes(k));
+    return [...o, ...CARDS.filter(k => !o.includes(k))];
+  }
+  let drag = null;
+  main.addEventListener('pointerdown', ev => {
+    const card = ev.target.closest('.grip') && ev.target.closest('.card[data-card]');
+    if (!card || drag) return;
+    const d = drag = { card, id: ev.pointerId, x: ev.clientX, y: ev.clientY, on: false };
+    d.timer = setTimeout(() => {
+      d.on = true;
+      d.grab = d.y - card.getBoundingClientRect().top;
+      card.classList.add('lifted');
+      if (navigator.vibrate) navigator.vibrate(10);
+    }, 450);
+  });
+  function endDrag(keep) {
+    const d = drag;
+    drag = null;
+    if (!d) return;
+    clearTimeout(d.timer);
+    if (!d.on) return;
+    d.card.classList.remove('lifted');
+    d.card.style.transform = '';
+    if (keep) { prefs.cards = [...main.querySelectorAll('.card[data-card]')].map(c => c.dataset.card); savePrefs(); }
+    render();
+  }
+  addEventListener('pointermove', ev => {
+    const d = drag;
+    if (!d || ev.pointerId !== d.id) return;
+    if (!d.on) {                                      // moved before the half second: a swipe, not a hold
+      if (Math.abs(ev.clientX - d.x) > 8 || Math.abs(ev.clientY - d.y) > 8) { clearTimeout(d.timer); drag = null; }
+      return;
+    }
+    const c = d.card, prev = c.previousElementSibling, next = c.nextElementSibling;
+    c.style.transform = '';
+    const mid = el => el.getBoundingClientRect().top + el.offsetHeight / 2;
+    if (prev && prev.matches('.card[data-card]') && ev.clientY < mid(prev)) main.insertBefore(c, prev);
+    else if (next && next.matches('.card[data-card]') && ev.clientY > mid(next)) main.insertBefore(next, c);
+    c.style.transform = `translateY(${ev.clientY - d.grab - c.getBoundingClientRect().top}px)`;
+    if (ev.clientY < 60) scrollBy(0, -12); else if (ev.clientY > innerHeight - 60) scrollBy(0, 12);
+  });
+  addEventListener('pointerup', ev => { if (drag && ev.pointerId === drag.id) endDrag(true); });
+  addEventListener('pointercancel', ev => { if (drag && ev.pointerId === drag.id) endDrag(drag.on); });
+  addEventListener('touchmove', ev => { if (drag && drag.on) ev.preventDefault(); }, { passive: false });
 
   // To-dos: one box, on the day planned (older than the page: on its first day, the date in front); done:
   // ticked, the words crossed out. One row each up to tomorrow; plans for later share rows where their words
@@ -399,7 +491,7 @@
       ...(pc.work || []).map(w => `<span><i class="cdot" style="background:${esc(w.color)}"></i>${esc(w.client)} ${hm(w.min)}</span>`),
       pc.screen ? `<span class="muted">screen ${hm(pc.screen.min)}</span>` : '',
     ].join('');
-    return `<section class="card today"><div class="th"><span class="title">today</span><span class="sums">${sums}</span></div>` +
+    return `<section class="card today" data-card="today"><div class="th"><span class="title grip">today</span><span class="sums">${sums}</span></div>` +
       `<div class="dline" data-ldate="${date}">${line}</div>` +
       `<div class="marks">${mark(woke, sl.woke != null)}${mark(Math.min(slept, 1439), sl.slept != null)}</div>` +
       `<div class="hours">${hours()}</div>` +
@@ -1094,6 +1186,7 @@
         <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create one on GitHub</a></p>`) +
       `<label>This device<input id="device" value="${esc(s.device)}"></label>` +
       `<label class="check"><input type="checkbox" id="colors"${prefs.colors ? ' checked' : ''}> A color per task (off: all green)</label>` +
+      '<p class="muted small">To move a card, hold its title for half a second, then drag it. The order stays on this device.</p>' +
       (archived.length ? '<h4>Archived</h4>' + archived.map(([list, t]) =>
         `<div class="arow"><span>${esc(t.name)}</span><button class="btn small" data-s="restore" data-list="${list}" data-id="${t.id}">Restore</button></div>`).join('') : '') +
       `<p class="muted small">${st.error ? esc(st.error) + '. ' : ''}${last} ${Store.waiting() ? Store.waiting() + ' changes waiting.' : ''}</p>` +
@@ -1149,7 +1242,7 @@
 
   Store.onChange(what => {
     if (what === 'status') return renderStatus();
-    if (!pop.hidden || typing() || quiet) { deferred = true; return renderStatus(); }
+    if (!pop.hidden || typing() || quiet || (drag && drag.on)) { deferred = true; return renderStatus(); }
     render();
     if (!sheetEl.hidden) renderSheet();
   });

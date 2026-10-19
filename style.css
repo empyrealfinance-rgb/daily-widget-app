@@ -58,6 +58,16 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 
 /* ---- a ledger: label column (sticky when it scrolls sideways), then weeks Monday..Sunday */
 .card { background: var(--surface); border-radius: 14px; padding: 10px 14px 12px; margin-bottom: 12px; position: relative; }
+.grip { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: grab; }
+.card.lifted { z-index: 6; box-shadow: 0 12px 32px rgba(0, 0, 0, .55), 0 0 0 1px rgba(240, 180, 99, .35); }
+
+/* health: a value a day (look a: the number, b: a bar, c: a tinted box) */
+.sq.mv, .sq.mt { display: flex; align-items: center; justify-content: center; font-size: 10px; letter-spacing: -.3px;
+  font-variant-numeric: tabular-nums; color: var(--muted); background: none; }
+.sq.mv.full { color: var(--c); }
+.sq.mt { color: var(--text); }
+.sq.mb { display: flex; align-items: flex-end; background: #1b1c20; overflow: hidden; }
+.sq.mb i { display: block; width: 100%; border-radius: 3px 3px 0 0; opacity: .85; }
 .ledger .scroller { position: relative; z-index: 1; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
 .ledger .scroller::-webkit-scrollbar { display: none; }
 .lrow { display: flex; align-items: center; gap: var(--wgap); width: max-content; padding: 3px 0; }
