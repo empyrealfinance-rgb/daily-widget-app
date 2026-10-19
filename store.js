@@ -80,7 +80,7 @@ const Store = (() => {
     if (!inbox) return 0;
     const list = (await call('GET', 'inbox')) || [];
     let n = 0;
-    for (const f of list.filter(f => f.type === 'file' && /\.txt$/i.test(f.name))) {
+    for (const f of list.filter(f => f.type === 'file')) {          // .txt or no extension: whatever the Shortcut named it
       const r = await call('GET', f.path);
       if (r) for (const op of Core.healthOps(f.name, Core.fromB64(r.content), config())) { queue.push({ path: pathOf(op), op }); n++; }
       write(KEY.queue, queue);
