@@ -249,6 +249,14 @@ var Core = (function () {
       d.supps = d.supps || {};
       t = d.supps[op.id] || (d.supps[op.id] = {});
       if (op.text) { t.note = op.text; if (op.at) t.noteAt = op.at; } else { delete t.note; delete t.noteAt; }
+    } else if (op.type === 'healthNote') {
+      // A note on a health row's day (id: "steps", "sleep"), kept apart from the numbers Apple Health replaces
+      d.health = d.health || {};
+      if (op.text) d.health[op.id] = op.at ? { note: op.text, noteAt: op.at } : { note: op.text };
+      else delete d.health[op.id];
+      i = 0;
+      for (t in d.health) if (d.health.hasOwnProperty(t)) i++;
+      if (!i) delete d.health;
     } else if (op.type === 'dayText') {
       // The day's note: what it went into, how it went (one text per day). Older days had a list of
       // timed notes; writing the text takes those in.

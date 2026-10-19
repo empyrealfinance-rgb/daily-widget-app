@@ -118,7 +118,7 @@ const Store = (() => {
   function message(ops) {
     const kinds = { task: 'tasks', note: 'notes', supp: 'supplements', suppNote: 'notes', dayNote: 'day notes', undayNote: 'day notes',
       gymDay: 'gym', gymNote: 'gym', gymEx: 'gym', status: 'archive', rename: 'names', add: 'new items', dayText: 'day note',
-      pc: 'time', sleep: 'sleep', steps: 'health', healthSleep: 'health', heart: 'health', order: 'order', todoAdd: 'to-dos', todoDone: 'to-dos', todoEdit: 'to-dos', todoDel: 'to-dos' };
+      pc: 'time', sleep: 'sleep', steps: 'health', healthSleep: 'health', heart: 'health', healthNote: 'notes', order: 'order', todoAdd: 'to-dos', todoDone: 'to-dos', todoEdit: 'to-dos', todoDel: 'to-dos' };
     const what = [...new Set(ops.map(q => kinds[q.op.type] || q.op.type))].join(', ');
     const dates = [...new Set(ops.map(q => q.op.date).filter(Boolean))].sort();
     return `${settings.device}: ${what} ${dates.join(', ')}`;

@@ -3,7 +3,7 @@
 // note gets a small dot in its corner; the note itself stays out of sight.
 //   click a box                                   done / not done (gym: the gym panel; supplement: taken now);
 //                                                 unticking an earlier day asks first
-//   right-click, Ctrl/Alt+click, long-press a box its note (Enter saves, Esc closes)
+//   right-click, Ctrl/Alt+click, long-press a box its note (Enter saves, Esc closes); a day of steps or sleep too
 //   click a date                                  that day's journal; a day to come: a new to-do for it
 //   click a name                                  rename it (Enter saves), move it up or down, Archive
 //   the empty box under the to-dos                type a new to-do in place (Enter adds it, Esc drops it)
@@ -234,7 +234,7 @@
     const body = list === 'todo' ? todoRows(rows, weeks, dates, L) : list === 'health' ? rows.map(r =>
       `<div class="lrow${r.tall ? ' tall' : ''}"><div class="lab"><span class="name"><i style="background:${r.color}"></i><span class="n">${r.name}</span>` +
       `${r.hint ? `<span class="hint">${r.hint}</span>` : ''}</span></div>` +
-      weeks.map(w => `<div class="wk">${w.map(d => (r.tall ? night(r, d, L) : fill(r, d))).join('')}</div>`).join('') + '</div>').join('') : rows.map(r => {
+      weeks.map(w => `<div class="wk">${w.map(d => (r.name === 'sleep' ? night(r, d, L) : stepsCell(r, d, L))).join('')}</div>`).join('') + '</div>').join('') : rows.map(r => {
       const c = colorOf(r);
       return `<div class="lrow"><div class="lab"><button class="name" data-info="${r.id}" data-list="${list}">` +
         (prefs.colors && r.color ? `<i style="background:${c}"></i>` : '') +
@@ -256,13 +256,15 @@
   //   steps  a box filling up from the bottom, full at 7,000 (the goal)
   //   sleep  a taller row: the night as a vertical line, its length the time asleep (up to 12 hours), broken
   //          where he woke up; a faint mark at 8 hours; the hours under it
-  const STEPS = '#6cb4c4', SLEEP = '#8e8bd6', STEP_GOAL = 7000;
+  // A day of either takes a note like a box (right-click, Ctrl/Alt+click, long-press; day.health.<row>.note).
+  const STEPS = '#6cb4c4', SLEEP = '#8e8bd6', STEP_GOAL = 7000, STEP_TOP = 12000;
   function healthRows(data, dates, now) {
-    const steps = {}, sleep = {}, nights = {};
+    const steps = {}, sleep = {}, nights = {}, notes = { steps: {}, sleep: {} };
     for (const d of dates) {
       const day = Core.dayOf(data, d);
       if (day && day.steps) steps[d] = day.steps.n;
       if (day && day.sleep && day.sleep.min) { sleep[d] = day.sleep.min; nights[d] = day.sleep; }
+      for (const k in (day && day.health) || {}) if (notes[k] && day.health[k].note) notes[k][d] = day.health[k].note;
     }
     const avg = (vals, fmt) => {
       const l = [];
@@ -270,18 +272,37 @@
       return l.length ? 'avg ' + fmt(Math.round(l.reduce((a, b) => a + b, 0) / l.length)) : '';
     };
     const out = [];
-    if (Object.keys(steps).length) out.push({ name: 'steps', color: STEPS, vals: steps, full: STEP_GOAL, fmt: kSteps, hint: avg(steps, kSteps) });
-    if (Object.keys(sleep).length) out.push({ name: 'sleep', color: SLEEP, vals: sleep, nights, fmt: hm, hint: avg(sleep, hm), tall: true });
+    const tall = (prefs.stepsLook || 'fill') !== 'fill';
+    if (Object.keys(steps).length) out.push({ name: 'steps', color: STEPS, vals: steps, full: STEP_GOAL, fmt: kSteps, hint: avg(steps, kSteps), notes: notes.steps, tall });
+    if (Object.keys(sleep).length) out.push({ name: 'sleep', color: SLEEP, vals: sleep, nights, fmt: hm, hint: avg(sleep, hm), notes: notes.sleep, tall: true });
     return out;
   }
   const kSteps = n => (n < 1000 ? String(Math.round(n)) : n < 9950 ? (n / 1000).toFixed(1) + 'k' : Math.round(n / 1000) + 'k');
-  // A day's steps: the box fills up from the bottom; at the goal it's full, like a ticked box
-  function fill(r, d) {
-    const v = r.vals[d];
-    if (v == null) return `<span class="sq mb" data-date="${d}"></span>`;
-    const k = Math.min(1, v / r.full);
-    return `<span class="sq mb${k >= 1 ? ' full' : ''}" data-date="${d}" title="${pretty(d)}: ${v.toLocaleString('en-US')} steps">` +
-      `<i style="height:${Math.max(8, k * 100).toFixed(1)}%;background:${r.color}"></i></span>`;
+  const nSteps = n => Math.round(n).toLocaleString('en-US');
+  // A health cell: a button for its note on the days so far (a dot in the corner when it has one)
+  function hcell(r, d, cls, style, title, inner) {
+    if (d > Core.today()) return `<span class="sq ${cls}"></span>`;
+    const note = r.notes[d];
+    return `<button class="sq ${cls}${note ? ' noted' : ''}" data-hrow="${r.name}" data-date="${d}" style="${style}" ` +
+      `title="${esc(title + (note ? ' · ' + note : ''))}">${inner}</button>`;
+  }
+  // A day's steps. fill: the box fills up from the bottom; at the goal it's full, like a ticked box. Drafts
+  // (2026-10-19, prefs.stepsLook until he picks), a tall row like sleep, 12,000 = the row, a faint mark at 7,000:
+  //   a  a wide bar like Apple Health's, the count under it      b  the same, the count on top of the bar
+  //   c  a thin line like sleep's, the count under it
+  function stepsCell(r, d, L) {
+    const v = r.vals[d], look = prefs.stepsLook || 'fill', title = `${pretty(d)}: ${v != null ? nSteps(v) + ' steps' : 'no steps'}`;
+    if (look === 'fill') {
+      if (v == null) return hcell(r, d, 'mb', '', title, '');
+      const k = Math.min(1, v / r.full);
+      return hcell(r, d, `mb${k >= 1 ? ' full' : ''}`, '', title, `<i style="height:${Math.max(8, k * 100).toFixed(1)}%;background:${r.color}"></i>`);
+    }
+    const rowH = Math.round(L.cell * 3), room = rowH - 14, per = room / STEP_TOP;
+    const style = `--g:${Math.round((look === 'b' ? 0 : 14) + STEP_GOAL * per)}px;--c:${r.color}`;
+    if (v == null) return hcell(r, d, `st ${look}`, style, title, '');
+    const h = Math.max(3, Math.min(room, v * per)).toFixed(1), goal = v >= STEP_GOAL ? ' goal' : '';
+    if (look === 'b') return hcell(r, d, `st b${goal}`, style, title, `<b>${nSteps(v)}</b><i style="height:${h}px"></i>`);
+    return hcell(r, d, `st ${look}${goal}`, style, title, `<i style="height:${h}px"></i><b>${nSteps(v)}</b>`);
   }
   // A night: the time asleep as a vertical line, 12 hours = the row's height (less the hours under it). Broken where
   // he woke up: at the gaps between Apple Health's In Bed stretches, or, for a night from the screenshots (woke = how
@@ -289,14 +310,27 @@
   function night(r, d, L) {
     const s = r.nights[d], rowH = Math.round(L.cell * 3), room = rowH - 14, per = room / 720;
     const guide = `--g:${Math.round(14 + 480 * per)}px`;
-    if (!s) return `<span class="sq sl" data-date="${d}" style="${d <= Core.today() ? guide : ''}"></span>`;
+    if (!s) return hcell(r, d, 'sl', guide, `${pretty(d)}: no sleep`, '');
     const spans = (s.at || []).map(([a, b]) => Core.diffDays(a.slice(0, 10), b.slice(0, 10)) * 1440 + toMin(b.slice(11)) - toMin(a.slice(11))).filter(m => m > 0);
     const woke = s.woke != null ? s.woke : Math.max(0, spans.length - 1);
     const parts = spans.length === woke + 1 ? spans : Array(woke + 1).fill(1);
     const sum = parts.reduce((a, b) => a + b, 0), len = Math.min(room, s.min * per);
     const segs = parts.map(p => `<i style="height:${Math.max(2, len * p / sum - (woke ? 2 : 0)).toFixed(1)}px"></i>`).join('');
-    return `<span class="sq sl" data-date="${d}" style="${guide};--c:${r.color}" title="${pretty(d)}: slept ${hm(s.min)}, woke ${woke}×">` +
-      `<span class="ln">${segs}</span><b>${hm(s.min)}</b></span>`;
+    return hcell(r, d, 'sl', `${guide};--c:${r.color}`, `${pretty(d)}: slept ${hm(s.min)}, woke ${woke}×`,
+      `<span class="ln">${segs}</span><b>${hm(s.min)}</b>`);
+  }
+  // A health day's note (steps or sleep), like a box's
+  function healthNotePop(el) {
+    const { hrow, date } = el.dataset, day = Core.dayOf(Store.data(), date) || {};
+    const cur = (day.health && day.health[hrow] && day.health[hrow].note) || '';
+    const what = hrow === 'steps' ? (day.steps ? nSteps(day.steps.n) + ' steps' : '') : (day.sleep && day.sleep.min ? 'slept ' + hm(day.sleep.min) : '');
+    openPop(el, `<div class="ph"><i style="background:${hrow === 'steps' ? STEPS : SLEEP}"></i>${hrow} · ${pretty(date)}${what ? ' · ' + what : ''}</div>` +
+      `<textarea rows="1">${esc(cur)}</textarea>`, {
+      save: () => {
+        const text = pop.querySelector('textarea').value.trim();
+        if (text !== cur) Store.change({ type: 'healthNote', date, id: hrow, text, at: Core.stamp() });
+      },
+    });
   }
 
   // ---- Moving the cards: hold a card's title for half a second, then drag it up or down. The order is kept on
@@ -803,7 +837,7 @@
 
   let press = null;
   main.addEventListener('pointerdown', ev => {
-    const el = ev.target.closest('.sq[data-id], .dh, .name, [data-todo], .dline');
+    const el = ev.target.closest('.sq[data-id], .sq[data-hrow], .dh, .name, [data-todo], .dline');
     if (!el || ev.pointerType === 'mouse' || (el.matches('.dh') && el.dataset.day > Core.today())) return;
     press = { el, x: ev.clientX, y: ev.clientY, long: false };
     press.timer = setTimeout(() => { press.long = true; longPress(el, press.x); }, 450);
@@ -815,12 +849,13 @@
 
   function longPress(el, x) {
     if (el.dataset.todo) todoPop(el);
+    else if (el.dataset.hrow) healthNotePop(el);
     else if (el.matches('.dline')) momentPop(el, x);
     else if (el.matches('.sq')) notePop(el); else if (el.matches('.dh')) datePop(el); else namePop(el);
   }
 
   main.addEventListener('contextmenu', ev => {
-    const el = ev.target.closest('.sq[data-id], .dh, .name, [data-todo], .dline');
+    const el = ev.target.closest('.sq[data-id], .sq[data-hrow], .dh, .name, [data-todo], .dline');
     if (!el) return;
     ev.preventDefault();
     if (!press || !press.long) longPress(el.matches('.nmk') ? el.parentNode : el, ev.clientX);
@@ -839,6 +874,7 @@
     if (ds.tday) return moveGhost(ds.tday);
     if (ds.newtodo) return startTodo(ds.newtodo);
     if (ds.note) return journalPop(el, ds.ndate, ds.note);
+    if (ds.hrow) return ev.ctrlKey || ev.altKey || ev.metaKey ? healthNotePop(el) : null;
     if (ds.id && ds.date) return ev.ctrlKey || ev.altKey || ev.metaKey ? notePop(el) : tap(el);
     if (ds.day) return datePop(el);
     if (ds.info) return namePop(el);
@@ -1102,6 +1138,7 @@
           if (e.note) out.boxNotes.push({ d, name: item ? item.name : id, text: e.note });
         }
       }
+      for (const k in day.health || {}) if (day.health[k].note) out.boxNotes.push({ d, name: k, text: day.health[k].note });
     }
     return out;
   }

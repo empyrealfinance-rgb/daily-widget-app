@@ -72,6 +72,17 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .sq.sl .ln i { display: block; width: 6px; border-radius: 3px; background: var(--c); }
 .sq.sl b { font-weight: 400; font-size: 9.5px; letter-spacing: -.3px; color: var(--muted); height: 14px; line-height: 14px;
   font-variant-numeric: tabular-nums; }
+/* steps drafts (prefs.stepsLook): a tall row, a faint mark at 7,000; a wide bar (a: count under, b: count on top)
+   or a thin line like sleep's (c); a bar at the goal is solid, under it softer */
+.sq.st { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border-radius: 0;
+  background: linear-gradient(to top, transparent var(--g, -9px), #2b2d33 var(--g, -9px), #2b2d33 calc(var(--g, -9px) + 1px), transparent calc(var(--g, -9px) + 1px)); }
+.sq.st i { display: block; flex: none; width: 72%; border-radius: 4px 4px 2px 2px; background: var(--c); opacity: .55; }
+.sq.st.goal i { opacity: 1; }
+.sq.st.c i { width: 6px; border-radius: 3px; }
+.sq.st b { flex: none; font-weight: 400; font-size: 9.5px; letter-spacing: -.4px; color: var(--muted); height: 14px; line-height: 14px;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sq.st.goal b { color: var(--text); }
+.sq.st.b b { height: 13px; line-height: 13px; }
 .ledger .scroller { position: relative; z-index: 1; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
 .ledger .scroller::-webkit-scrollbar { display: none; }
 .lrow { display: flex; align-items: center; gap: var(--wgap); width: max-content; padding: 3px 0; }
