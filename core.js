@@ -260,8 +260,10 @@ var Core = (function () {
     } else if (op.type === 'sleep') {
       if (op.sleep) d.sleep = op.sleep; else delete d.sleep;
     } else if (op.type === 'steps') {
-      // Apple Health's step count for the day (the phone's Shortcut), the latest so far
-      if (op.steps) d.steps = op.steps; else delete d.steps;
+      // Apple Health's step count for the day (the phone's Shortcut): the most it has said for that day (a run
+      // before the band synced, or the next morning's look back, doesn't lower it)
+      if (!op.steps) delete d.steps;
+      else if (!d.steps || op.steps.n >= d.steps.n) d.steps = op.steps;
     } else if (op.type === 'heart') {
       // Apple Health's heart rate that day, summed up (healthOps); a count from as many samples or more replaces it
       // (a later run sees the whole day; one that only reached the day's end doesn't undo it). One from before the
@@ -521,11 +523,13 @@ var Core = (function () {
 
   function healthOps(name, text, config) {
     var m = /(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})/.exec(name), day = m ? m[1] : today(), at = m ? day + ' ' + m[2] + ':' + m[3] : stamp();
-    var s = String(text || ''), re = /\b(steps|sleep|hr)\b([\s\S]*?)(?=\b(?:steps|sleep|hr)\b|$)/gi, e, ops = [], nights = {}, beats = {}, k, n;
+    var s = String(text || ''), re = /\b(steps|sleep|hr)\b([\s\S]*?)(?=\b(?:steps|sleep|hr)\b|$)/gi, e, ops = [], steps = {}, nights = {}, beats = {}, k, n;
     while ((e = re.exec(s))) {
       var kind = e[1].toLowerCase(), times = whens(e[2]), rest = e[2].replace(WHEN, ' ');
       if (kind === 'steps') {
-        if (!isNaN(n = bigCount(rest))) ops.push({ type: 'steps', date: day, steps: { n: n, at: at } });
+        // "steps 1318" counts for the file's day; "steps 2026-10-18T00:00:00+02:00 9234" for that day
+        k = times.length ? times[0].slice(0, 10) : day;
+        if (!isNaN(n = times.length ? count(rest) : bigCount(rest)) && !(n <= steps[k])) steps[k] = n;
       } else if (kind === 'sleep') {
         if (times.length < 2 || !(times[0] < times[1])) continue;
         k = +times[1].slice(11, 13) >= 18 ? addDays(times[1].slice(0, 10), 1) : times[1].slice(0, 10);
@@ -535,6 +539,7 @@ var Core = (function () {
         (beats[k] = beats[k] || []).push([minutesOf(times[0]), n]);
       }
     }
+    for (k in steps) if (steps.hasOwnProperty(k)) ops.push({ type: 'steps', date: k, steps: { n: steps[k], at: at } });
     for (k in nights) if (nights.hasOwnProperty(k)) ops.push({ type: 'healthSleep', date: k, at: joinSpans(nights[k]) });
     var ct = cardioTask(config), bpm = (ct && ct.bpm) || 110;
     for (k in beats) if (beats.hasOwnProperty(k)) ops.push({ type: 'heart', date: k, heart: heartDay(beats[k], k, bpm, at) });
