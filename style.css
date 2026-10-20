@@ -78,6 +78,17 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .sq.st b { flex: none; font-weight: 400; font-size: 9.5px; letter-spacing: -.4px; color: var(--muted); height: 13px; line-height: 13px;
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sq.st.goal b { color: var(--text); }
+/* steps in laps of 7,000 (drafts, prefs.lapLook): a small outlined bar, each lap filling it again from the bottom */
+.lrow.mid .sq { height: calc(var(--cell) * 2); }
+.sq.sk { border-radius: 0; }
+.sq.sk .ol { position: absolute; left: 14%; right: 14%; bottom: 0; height: var(--h); border: 1px solid #3a3d44;
+  border-radius: 4px; overflow: hidden; }
+.sq.sk .ol i { position: absolute; left: 0; right: 0; bottom: 0; display: block; }
+.sq.sk.c .ol i.l1 { left: 17%; right: 17%; }
+.sq.sk.c .ol i.l2 { left: 33%; right: 33%; }
+.sq.sk b { position: absolute; left: -5px; right: -5px; text-align: center; font-weight: 400; font-size: 9.5px;
+  letter-spacing: -.4px; line-height: 12px; color: var(--text); text-shadow: 0 0 3px #000, 0 0 2px #000;
+  white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ledger .scroller { position: relative; z-index: 1; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
 .ledger .scroller::-webkit-scrollbar { display: none; }
 .lrow { display: flex; align-items: center; gap: var(--wgap); width: max-content; padding: 3px 0; }

@@ -232,7 +232,7 @@
         return `<button class="dh${d === now ? ' today' : ''}${n === 1 ? ' m1' : ''}" data-day="${d}" title="${pretty(d)}"><span>${'MTWTFSS'[i]}</span>${lbl}</button>`;
       }).join('')}</div>`).join('') + '</div>';
     const body = list === 'todo' ? todoRows(rows, weeks, dates, L) : list === 'health' ? rows.map(r =>
-      `<div class="lrow${r.tall ? ' tall' : ''}"><div class="lab"><span class="name"><i style="background:${r.color}"></i><span class="n">${r.name}</span>` +
+      `<div class="lrow${r.tall ? ' tall' : ''}${r.mid ? ' mid' : ''}"><div class="lab"><span class="name"><i style="background:${r.color}"></i><span class="n">${r.name}</span>` +
       `${r.hint ? `<span class="hint">${r.hint}</span>` : ''}</span></div>` +
       weeks.map(w => `<div class="wk">${w.map(d => (r.name === 'sleep' ? night(r, d, L) : stepsCell(r, d, L))).join('')}</div>`).join('') + '</div>').join('') : rows.map(r => {
       const c = colorOf(r);
@@ -273,7 +273,8 @@
       return l.length ? 'avg ' + fmt(Math.round(l.reduce((a, b) => a + b, 0) / l.length)) : '';
     };
     const out = [];
-    if (Object.keys(steps).length) out.push({ name: 'steps', color: STEPS, vals: steps, fmt: kSteps, hint: avg(steps, kSteps), notes: notes.steps, tall: true });
+    const laps = !!prefs.lapLook;
+    if (Object.keys(steps).length) out.push({ name: 'steps', color: STEPS, vals: steps, fmt: kSteps, hint: avg(steps, kSteps), notes: notes.steps, tall: !laps, mid: laps });
     if (Object.keys(sleep).length) out.push({ name: 'sleep', color: SLEEP, vals: sleep, nights, fmt: hm, hint: avg(sleep, hm), notes: notes.sleep, tall: true });
     return out;
   }
@@ -288,11 +289,26 @@
   }
   // A day's steps: a bar, 12,000 = the row (less the count on top), solid once it reaches the goal
   function stepsCell(r, d, L) {
+    if (prefs.lapLook) return lapCell(r, d, L, prefs.lapLook);
     const v = r.vals[d], title = `${pretty(d)}: ${v != null ? nSteps(v) + ' steps' : 'no steps'}`;
     const room = Math.round(L.cell * 3) - 14, per = room / STEP_TOP, style = `--g:${Math.round(STEP_GOAL * per)}px;--c:${r.color}`;
     if (v == null) return hcell(r, d, 'st', style, title, '');
     const h = Math.max(3, Math.min(room, v * per)).toFixed(1);
     return hcell(r, d, `st${v >= STEP_GOAL ? ' goal' : ''}`, style, title, `<b>${nSteps(v)}</b><i style="height:${h}px"></i>`);
+  }
+  // Drafts (2026-10-20, his walk note; prefs.lapLook until he picks): steps in laps of 7,000. A small outline of a
+  // bar; the first 7,000 fill it from the bottom, the next 7,000 start again from the bottom over it in another
+  // color, then a third (up to 21,000); the count on top of the newest fill. a: one hue, brighter each lap;
+  // b: three colors; c: three colors, each lap narrower, so the ones under it show at its sides.
+  const LAP = 7000, LAP_COLORS = { a: ['#3b7a87', '#62bccd', '#bdf0f8'], b: ['#4f94a3', '#d9a94e', '#e07a68'], c: ['#4f94a3', '#d9a94e', '#e07a68'] };
+  function lapCell(r, d, L, look) {
+    const v = r.vals[d], room = Math.round(L.cell * 2) - 13, title = `${pretty(d)}: ${v != null ? nSteps(v) + ' steps' : 'no steps'}`;
+    if (v == null) return hcell(r, d, `sk ${look}`, `--h:${room}px`, title, '<span class="ol"></span>');
+    const lap = Math.min(2, Math.max(0, Math.ceil(v / LAP) - 1)), k = Math.min(1, (v - lap * LAP) / LAP);
+    const fills = LAP_COLORS[look].slice(0, lap + 1).map((c, i) =>
+      `<i class="l${i}" style="height:${i < lap ? 100 : (k * 100).toFixed(1)}%;background:${c}"></i>`).join('');
+    return hcell(r, d, `sk ${look}`, `--h:${room}px`, title,
+      `<span class="ol">${fills}</span><b style="bottom:${Math.round(k * room) + 1}px">${nSteps(v)}</b>`);
   }
   // A night: the time asleep as a vertical line, 12 hours = the row's height (less the hours under it). Broken where
   // he woke up: at the gaps between Apple Health's In Bed stretches, or, for a night from the screenshots (woke = how
