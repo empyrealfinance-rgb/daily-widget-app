@@ -295,19 +295,35 @@
     return hcell(r, d, `st${v >= STEP_GOAL ? ' goal' : ''}`, style, title, `<b>${nSteps(v)}</b><i style="height:${h}px"></i>`);
   }
   // A night: the time asleep as a vertical line, 12 hours = the row's height (less the hours under it). Broken where
-  // he woke up: at the gaps between Apple Health's In Bed stretches, or, for a night from the screenshots (woke = how
-  // many times), evenly.
+  // he woke up: at the wake-ups' times from the screenshots' stage chart (wakes), else at the gaps between Apple
+  // Health's In Bed stretches, else, for a night from the screenshots (woke = how many times), evenly.
   function night(r, d, L) {
     const s = r.nights[d], rowH = Math.round(L.cell * 3), room = rowH - 14, per = room / 720;
     const guide = `--g:${Math.round(14 + 480 * per)}px`;
     if (!s) return hcell(r, d, 'sl', guide, `${pretty(d)}: no sleep`, '');
     const spans = (s.at || []).map(([a, b]) => Core.diffDays(a.slice(0, 10), b.slice(0, 10)) * 1440 + toMin(b.slice(11)) - toMin(a.slice(11))).filter(m => m > 0);
-    const woke = s.woke != null ? s.woke : Math.max(0, spans.length - 1);
-    const parts = spans.length === woke + 1 ? spans : Array(woke + 1).fill(1);
+    const exact = wakeParts(s), woke = exact ? exact.length - 1 : s.woke != null ? s.woke : Math.max(0, spans.length - 1);
+    const parts = exact || (spans.length === woke + 1 ? spans : Array(woke + 1).fill(1));
     const sum = parts.reduce((a, b) => a + b, 0), len = Math.min(room, s.min * per);
     const segs = parts.map(p => `<i style="height:${Math.max(2, len * p / sum - (woke ? 2 : 0)).toFixed(1)}px"></i>`).join('');
     return hcell(r, d, 'sl', `${guide};--c:${r.color}`, `${pretty(d)}: slept ${hm(s.min)}, woke ${woke}×`,
       `<span class="ln">${segs}</span><b>${hm(s.min)}</b>`);
+  }
+  // The stretches asleep between the wake-ups (wakes: [["02:14", 6], …], when and how many minutes), from falling
+  // asleep to getting up; null when there are none or they don't fit the night
+  function wakeParts(s) {
+    if (!s.wakes || !s.wakes.length || !s.at || !s.at.length) return null;
+    const t0 = s.at[0][0], t1 = s.at[s.at.length - 1][1], a = toMin(t0.slice(11));
+    const z = Core.diffDays(t0.slice(0, 10), t1.slice(0, 10)) * 1440 + toMin(t1.slice(11)), out = [];
+    let cur = a;
+    for (const [hhmm, m] of s.wakes) {
+      let w = toMin(hhmm);
+      if (w < a) w += 1440;
+      out.push(w - cur);
+      cur = w + (m || 0);
+    }
+    out.push(z - cur);
+    return out.every(x => x > 0) ? out : null;
   }
   // A health day's note (steps or sleep), like a box's
   function healthNotePop(el) {
@@ -512,11 +528,7 @@
     for (const [a, b] of sl.spans) line += bar(a, b, 'sl');
     for (const [a, b] of spansOf(pc.screen && pc.screen.at)) line += bar(a, b, 'scr');
     for (const w of pc.work || []) for (const [a, b] of spansOf(w.at)) line += bar(a, b, 'wk', w.color);
-    for (const [a, b] of spansOf(heart && heart.cardio)) line += bar(a, b, 'cd', ct && ct.color);
-    // only a low and a high per hour (Mi Fitness): the hours whose high reached the cardio bpm, fainter
-    if (heart && heart.hours && !heart.min) {
-      for (const h in heart.hours) if (heart.hours[h][1] >= ((ct && ct.bpm) || 110)) line += bar(h * 60, h * 60 + 60, 'cd hr', ct && ct.color);
-    }
+    // no heart rate on the line (2026-10-20, his call: his walks are always in the 110+ range, the marks said little)
     const mark = (m, real) => `<span class="mk${real ? ' real' : ''}" style="left:${pct(m)}"><b>${hm(m % 1440)}</b></span>`;
     if (nowMin != null) line += `<i class="now" style="left:${pct(nowMin)}"></i>`;
     const notes = Core.dayNotes(data, date);
