@@ -210,6 +210,19 @@ var Core = (function () {
     var d = dayOf(data, date);
     return (d && d.supps && d.supps[s.id]) || null;
   }
+  // A supplement's dose the last time it was taken before date (or what its note began with then, "0.25g"), else its
+  // usual one. Powders (powder: true) are weighed each time, so the app asks with this filled in.
+  function lastDose(s, data, date) {
+    for (var i = 1, m; i <= 90; i++) {
+      var e = suppOf(s, data, addDays(date, -i));
+      if (e && e.taken) {
+        if (e.dose) return e.dose;
+        m = e.note && (/^\s*(\d*[.,]?\d+)\s*(m?g)\b/i.exec(e.note) || /^\s*(\d*[.,]?\d+)\s*$/.exec(e.note));
+        if (m) return m[1].replace(',', '.') + ' ' + (m[2] || 'g');
+      }
+    }
+    return s.dose || '';
+  }
   function suppRows(config, data, dates, now) {
     now = now || today();
     var out = [], list = config.supplements || [];
@@ -219,9 +232,9 @@ var Core = (function () {
       for (var j = 0; j < dates.length; j++) {
         var e = suppOf(s, data, dates[j]), d = dates[j], on = statusOn(s, d);
         var st = on !== 'active' && !(on === null && d <= now) ? 'off' : e && e.taken ? 'done' : d > now ? 'future' : 'open';
-        cells.push({ date: d, state: st, note: (e && e.note) || '', t: (e && e.t) || '' });
+        cells.push({ date: d, state: st, note: (e && e.note) || '', t: (e && e.t) || '', dose: (e && e.dose) || '' });
       }
-      out.push(rowOf(s, cells, { kind: 'supplement', optional: false, hint: s.dose || '' }));
+      out.push(rowOf(s, cells, { kind: 'supplement', optional: false, hint: s.dose || '', powder: !!s.powder }));
     }
     return out;
   }
@@ -615,7 +628,7 @@ var Core = (function () {
     hhmm: hhmm, weekday: weekday, monday: monday, monthOf: monthOf, weeks: weeks, span: span, statusOn: statusOn, find: find,
     dayOf: dayOf, entryOf: entryOf, isDone: isDone, windowOf: windowOf, cell: cell, weekCount: weekCount,
     hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, isSet: isSet, apply: apply, dayText: dayText,
-    dayNotes: dayNotes, isConfigOp: isConfigOp, newItem: newItem, moveOp: moveOp, applyConfig: applyConfig,
+    dayNotes: dayNotes, lastDose: lastDose, isConfigOp: isConfigOp, newItem: newItem, moveOp: moveOp, applyConfig: applyConfig,
     isTodoOp: isTodoOp, applyTodo: applyTodo, newTodo: newTodo, todosShown: todosShown, stamp: stamp,
     serializeTodo: serializeTodo, healthOps: healthOps, joinSpans: joinSpans, cardioMin: cardioMin, cardioTask: cardioTask,
     serialize: serialize, serializeConfig: serializeConfig, toB64: toB64, fromB64: fromB64, newId: newId

@@ -478,11 +478,14 @@
   // a day under the field: the field keeps the focus (and the keyboard stays up)
   main.addEventListener('pointerdown', ev => { if (ev.target.closest('[data-tday]')) ev.preventDefault(); });
 
+  // A box. A powder taken shows its dose on it; drafts (2026-10-20, prefs.doseLook until he picks): a, the number
+  // in the middle, dark on the color; b, small in the corner; c, the box as a ring in the color, the number inside.
   function box(r, c, list, color) {
     if (c.state === 'none' || c.state === 'off') return '<span class="sq"></span>';
     if (c.state === 'rest') return `<span class="sq s-rest" data-date="${c.date}" title="rest day"></span>`;
-    return `<button class="sq s-${c.state}${c.note ? ' noted' : ''}" style="--c:${color}" data-id="${r.id}" data-list="${list}" ` +
-      `data-date="${c.date}"></button>`;
+    const dose = r.powder && c.state === 'done' && prefs.doseLook ? shortDose(c.dose) : '';
+    return `<button class="sq s-${c.state}${c.note ? ' noted' : ''}${dose ? ' dz dz-' + prefs.doseLook : ''}" style="--c:${color}" ` +
+      `data-id="${r.id}" data-list="${list}" data-date="${c.date}"${c.dose ? ` title="${esc(c.dose)}"` : ''}>${dose ? `<b>${dose}</b>` : ''}</button>`;
   }
 
   // ---- Today: the day as a line from midnight to midnight, and the day's note
@@ -610,11 +613,28 @@
     const s = list === 'supps' ? Core.find(cfg.supplements, id) : null, t = s ? null : Core.find(cfg.tasks, id);
     if (t && t.kind === 'gym') return openGym(date);
     const on = s ? !(Core.suppOf(s, data, date) || {}).taken : !Core.isDone(t, data, date);
-    const write = () => Store.change(s ? { type: 'supp', date, id, on, t: date === now ? Core.hhmm() : '', dose: s.dose || '' }
+    const write = dose => Store.change(s ? { type: 'supp', date, id, on, t: date === now ? Core.hhmm() : '', dose: dose != null ? dose : s.dose || '' }
       : { type: 'task', date, id, done: on });
-    if (!on && date < now) return untickPop(el, s || t, date, write);
+    if (!on && date < now) return untickPop(el, s || t, date, () => write());
+    if (on && s && s.powder) return dosePop(el, s, date, write);
     write();
   }
+
+  // A powder: how much this time, last time's dose filled in. Enter (or a click elsewhere) ticks it with that dose;
+  // Esc leaves it unticked. A bare number takes last time's unit ("0.3" -> "0.3 g").
+  function dosePop(el, s, date, write) {
+    const prev = Core.lastDose(s, Store.data(), date), unit = (/(m?g)\s*$/i.exec(prev) || [, 'g'])[1];
+    openPop(el, `<div class="ph"><i style="background:${colorOf(s)}"></i>${esc(s.name)} · ${pretty(date)}</div>` +
+      `<label class="dosel">dose<input class="dose" value="${esc(prev)}" inputmode="decimal" autocomplete="off"></label>`, {
+      save: () => {
+        let v = pop.querySelector('input.dose').value.trim().replace(',', '.');
+        if (/^\d*\.?\d+$/.test(v)) v += ' ' + unit;
+        write(v);
+      },
+    });
+  }
+  // "0.25 g" -> ".25", "5 g" -> "5": the number on a powder's box
+  const shortDose = d => { const m = /\d*[.,]?\d+/.exec(String(d || '')); return m ? m[0].replace(',', '.').replace(/^0\./, '.') : ''; };
 
   // Unticking an earlier day asks first: Enter (or Untick) unticks, Esc or a click elsewhere keeps it.
   function untickPop(el, item, date, untick) {
