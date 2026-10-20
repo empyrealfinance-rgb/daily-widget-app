@@ -236,7 +236,7 @@
       `${r.hint ? `<span class="hint">${r.hint}</span>` : ''}</span></div>` +
       weeks.map(w => `<div class="wk">${w.map(d => (r.name === 'sleep' ? night(r, d, L) : stepsCell(r, d, L))).join('')}</div>`).join('') + '</div>').join('') : rows.map(r => {
       const c = colorOf(r);
-      return `<div class="lrow"><div class="lab"><button class="name" data-info="${r.id}" data-list="${list}">` +
+      return `<div class="lrow"><div class="lab"><button class="name${r.quiet ? ' quiet' : ''}" data-info="${r.id}" data-list="${list}">` +
         (prefs.colors && r.color ? `<i style="background:${c}"></i>` : '') +
         `<span class="n">${esc(r.name)}</span>${r.hint ? `<span class="hint">${esc(r.hint)}</span>` : ''}</button></div>` +
         weeks.map((w, wi) => `<div class="wk">${w.map((d, di) => box(r, r.cells[wi * 7 + di], list, c)).join('')}</div>`).join('') +
@@ -253,7 +253,8 @@
 
   // ---- Health: Apple Health's steps and the nights' sleep, a day each (docs/HEALTH.md); a row shows once it has
   // a day. Beside the name, the last 7 days' average.
-  //   steps  a box filling up from the bottom, full at 7,000 (the goal)
+  //   steps  a taller row: the day as a bar like Apple Health's, 12,000 = the row, the count on top of it; a faint
+  //          mark at 7,000 (the goal), a bar that reaches it solid
   //   sleep  a taller row: the night as a vertical line, its length the time asleep (up to 12 hours), broken
   //          where he woke up; a faint mark at 8 hours; the hours under it
   // A day of either takes a note like a box (right-click, Ctrl/Alt+click, long-press; day.health.<row>.note).
@@ -272,8 +273,7 @@
       return l.length ? 'avg ' + fmt(Math.round(l.reduce((a, b) => a + b, 0) / l.length)) : '';
     };
     const out = [];
-    const tall = (prefs.stepsLook || 'fill') !== 'fill';
-    if (Object.keys(steps).length) out.push({ name: 'steps', color: STEPS, vals: steps, full: STEP_GOAL, fmt: kSteps, hint: avg(steps, kSteps), notes: notes.steps, tall });
+    if (Object.keys(steps).length) out.push({ name: 'steps', color: STEPS, vals: steps, fmt: kSteps, hint: avg(steps, kSteps), notes: notes.steps, tall: true });
     if (Object.keys(sleep).length) out.push({ name: 'sleep', color: SLEEP, vals: sleep, nights, fmt: hm, hint: avg(sleep, hm), notes: notes.sleep, tall: true });
     return out;
   }
@@ -286,23 +286,13 @@
     return `<button class="sq ${cls}${note ? ' noted' : ''}" data-hrow="${r.name}" data-date="${d}" style="${style}" ` +
       `title="${esc(title + (note ? ' · ' + note : ''))}">${inner}</button>`;
   }
-  // A day's steps. fill: the box fills up from the bottom; at the goal it's full, like a ticked box. Drafts
-  // (2026-10-19, prefs.stepsLook until he picks), a tall row like sleep, 12,000 = the row, a faint mark at 7,000:
-  //   a  a wide bar like Apple Health's, the count under it      b  the same, the count on top of the bar
-  //   c  a thin line like sleep's, the count under it
+  // A day's steps: a bar, 12,000 = the row (less the count on top), solid once it reaches the goal
   function stepsCell(r, d, L) {
-    const v = r.vals[d], look = prefs.stepsLook || 'fill', title = `${pretty(d)}: ${v != null ? nSteps(v) + ' steps' : 'no steps'}`;
-    if (look === 'fill') {
-      if (v == null) return hcell(r, d, 'mb', '', title, '');
-      const k = Math.min(1, v / r.full);
-      return hcell(r, d, `mb${k >= 1 ? ' full' : ''}`, '', title, `<i style="height:${Math.max(8, k * 100).toFixed(1)}%;background:${r.color}"></i>`);
-    }
-    const rowH = Math.round(L.cell * 3), room = rowH - 14, per = room / STEP_TOP;
-    const style = `--g:${Math.round((look === 'b' ? 0 : 14) + STEP_GOAL * per)}px;--c:${r.color}`;
-    if (v == null) return hcell(r, d, `st ${look}`, style, title, '');
-    const h = Math.max(3, Math.min(room, v * per)).toFixed(1), goal = v >= STEP_GOAL ? ' goal' : '';
-    if (look === 'b') return hcell(r, d, `st b${goal}`, style, title, `<b>${nSteps(v)}</b><i style="height:${h}px"></i>`);
-    return hcell(r, d, `st ${look}${goal}`, style, title, `<i style="height:${h}px"></i><b>${nSteps(v)}</b>`);
+    const v = r.vals[d], title = `${pretty(d)}: ${v != null ? nSteps(v) + ' steps' : 'no steps'}`;
+    const room = Math.round(L.cell * 3) - 14, per = room / STEP_TOP, style = `--g:${Math.round(STEP_GOAL * per)}px;--c:${r.color}`;
+    if (v == null) return hcell(r, d, 'st', style, title, '');
+    const h = Math.max(3, Math.min(room, v * per)).toFixed(1);
+    return hcell(r, d, `st${v >= STEP_GOAL ? ' goal' : ''}`, style, title, `<b>${nSteps(v)}</b><i style="height:${h}px"></i>`);
   }
   // A night: the time asleep as a vertical line, 12 hours = the row's height (less the hours under it). Broken where
   // he woke up: at the gaps between Apple Health's In Bed stretches, or, for a night from the screenshots (woke = how
@@ -542,10 +532,11 @@
       `<div class="dline" data-ldate="${date}">${line}</div>` +
       `<div class="marks">${mark(woke, sl.woke != null)}${mark(Math.min(slept, 1439), sl.slept != null)}</div>` +
       `<div class="hours">${hours()}</div>` +
-      `<label class="jl" for="dtext">journal</label>` +
-      notes.map(n => `<button class="jn" data-note="${n.id}" data-ndate="${date}"><span class="jt">${n.t || ''}</span>` +
-        `<span class="jx">${esc(n.text)}</span></button>`).join('') +
-      `<textarea class="dtext" id="dtext" rows="1" data-date="${date}"></textarea></section>`;
+      // the journal: a wide + on top opens the field for a new line; the newest line first (he asked 2026-10-19)
+      `<div class="jl">journal</div><button class="jadd" data-jadd aria-label="Add to the journal">+</button>` +
+      `<textarea class="dtext" id="dtext" rows="1" data-date="${date}" hidden></textarea>` +
+      notes.slice().reverse().map(n => `<button class="jn" data-note="${n.id}" data-ndate="${date}"><span class="jt">${n.t || ''}</span>` +
+        `<span class="jx">${esc(n.text)}</span></button>`).join('') + '</section>';
   }
 
   // A journal line: Enter (or leaving the field) adds it with the time it was written. The page redraws a
@@ -570,8 +561,20 @@
     setTimeout(() => { if (deferred && !typing() && pop.hidden) render(); }, 300);
   }
   main.addEventListener('input', ev => { if (ev.target.matches('.dtext')) grow(ev.target); });
+  // The wide + over the journal: the field takes its place; left empty, the + comes back
+  function openJournal(b) {
+    const ta = b.nextElementSibling;
+    b.hidden = true;
+    ta.hidden = false;
+    grow(ta);
+    ta.focus();
+  }
   main.addEventListener('focusout', ev => {
-    if (ev.target.matches('.dtext')) saveDayText(ev.target);
+    if (ev.target.matches('.dtext')) {
+      saveDayText(ev.target);
+      ev.target.hidden = true;
+      ev.target.previousElementSibling.hidden = false;
+    }
     if (ev.target.matches('.tdin')) addTyped(ev.target);
   });
   main.addEventListener('keydown', ev => {
@@ -875,6 +878,7 @@
     if (ds.newtodo) return startTodo(ds.newtodo);
     if (ds.note) return journalPop(el, ds.ndate, ds.note);
     if (ds.hrow) return ev.ctrlKey || ev.altKey || ev.metaKey ? healthNotePop(el) : null;
+    if ('jadd' in ds) return openJournal(el);
     if (ds.id && ds.date) return ev.ctrlKey || ev.altKey || ev.metaKey ? notePop(el) : tap(el);
     if (ds.day) return datePop(el);
     if (ds.info) return namePop(el);

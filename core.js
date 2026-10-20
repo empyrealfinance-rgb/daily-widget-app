@@ -184,10 +184,11 @@ var Core = (function () {
     return r;
   }
 
-  // The grid: one row per task active today (in config order), one cell per date.
+  // The grid: one row per task active today (in config order), one cell per date. quiet: not due today (still
+  // open) nor tomorrow, so its name is greyed (he asked 2026-10-19: what's not coming up shouldn't draw the eye).
   function rows(config, data, dates, now) {
     now = now || today();
-    var out = [], tasks = config.tasks || [];
+    var out = [], tasks = config.tasks || [], tom = addDays(now, 1), a, b;
     for (var i = 0; i < tasks.length; i++) {
       var t = tasks[i], cells = [];
       if (statusOn(t, now) !== 'active') continue;
@@ -195,7 +196,10 @@ var Core = (function () {
         var e = entryOf(t, data, dates[j]);
         cells.push({ date: dates[j], state: cell(t, data, dates[j], now, config), note: (e && e.note) || '' });
       }
-      out.push(rowOf(t, cells, { kind: t.kind, optional: t.must === false, hint: hint(t, data, now) }));
+      a = cell(t, data, now, now, config);
+      b = cell(t, data, tom, now, config);
+      out.push(rowOf(t, cells, { kind: t.kind, optional: t.must === false, hint: hint(t, data, now),
+        quiet: !(a === 'todo' || b === 'future' || b === 'done') }));
     }
     return out;
   }

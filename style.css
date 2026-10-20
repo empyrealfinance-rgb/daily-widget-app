@@ -61,10 +61,7 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .grip { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: grab; }
 .card.lifted { z-index: 6; box-shadow: 0 12px 32px rgba(0, 0, 0, .55), 0 0 0 1px rgba(240, 180, 99, .35); }
 
-/* health: steps fill their box; sleep is a tall row of vertical lines (the night), broken where he woke */
-.sq.mb { display: flex; align-items: flex-end; background: #1b1c20; overflow: hidden; }
-.sq.mb i { display: block; width: 100%; border-radius: 3px 3px 0 0; opacity: .8; }
-.sq.mb.full i { border-radius: 0; opacity: 1; }
+/* health: tall rows; sleep a vertical line a night (broken where he woke), steps a bar a day */
 .lrow.tall .sq { height: calc(var(--cell) * 3); }
 .sq.sl { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border-radius: 0;
   background: linear-gradient(to top, transparent var(--g, -9px), #2b2d33 var(--g, -9px), #2b2d33 calc(var(--g, -9px) + 1px), transparent calc(var(--g, -9px) + 1px)); }
@@ -72,17 +69,15 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .sq.sl .ln i { display: block; width: 6px; border-radius: 3px; background: var(--c); }
 .sq.sl b { font-weight: 400; font-size: 9.5px; letter-spacing: -.3px; color: var(--muted); height: 14px; line-height: 14px;
   font-variant-numeric: tabular-nums; }
-/* steps drafts (prefs.stepsLook): a tall row, a faint mark at 7,000; a wide bar (a: count under, b: count on top)
-   or a thin line like sleep's (c); a bar at the goal is solid, under it softer */
+/* steps (option B of three, 2026-10-19): a wide bar with the count on top, a faint mark at 7,000; a bar at the goal
+   solid, under it softer */
 .sq.st { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border-radius: 0;
   background: linear-gradient(to top, transparent var(--g, -9px), #2b2d33 var(--g, -9px), #2b2d33 calc(var(--g, -9px) + 1px), transparent calc(var(--g, -9px) + 1px)); }
 .sq.st i { display: block; flex: none; width: 72%; border-radius: 4px 4px 2px 2px; background: var(--c); opacity: .55; }
 .sq.st.goal i { opacity: 1; }
-.sq.st.c i { width: 6px; border-radius: 3px; }
-.sq.st b { flex: none; font-weight: 400; font-size: 9.5px; letter-spacing: -.4px; color: var(--muted); height: 14px; line-height: 14px;
+.sq.st b { flex: none; font-weight: 400; font-size: 9.5px; letter-spacing: -.4px; color: var(--muted); height: 13px; line-height: 13px;
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sq.st.goal b { color: var(--text); }
-.sq.st.b b { height: 13px; line-height: 13px; }
 .ledger .scroller { position: relative; z-index: 1; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
 .ledger .scroller::-webkit-scrollbar { display: none; }
 .lrow { display: flex; align-items: center; gap: var(--wgap); width: max-content; padding: 3px 0; }
@@ -104,6 +99,7 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 }
 .name i { width: 3px; height: 14px; border-radius: 2px; flex: none; }
 .name .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name.quiet .n { color: var(--muted); }       /* a task not due today or tomorrow: its name steps back, not its boxes */
 .name .hint { color: var(--muted); font-size: 11px; flex: none; }
 
 .sq, .dh { opacity: var(--fade, 1); }   /* older days fade out (app.js fade()) */
@@ -211,8 +207,12 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .hours span:first-child { transform: none; }
 .hours span:last-child { transform: translateX(-100%); }
 .jl { display: block; margin: 14px 0 5px; font-size: 12px; color: var(--muted); }
+.jadd { display: block; width: 100%; height: 36px; margin: 2px 0 6px; border: 1px dashed #3a3d44; border-radius: 10px;
+  background: none; color: var(--muted); font-size: 20px; line-height: 1; }
+.jadd[hidden], .dtext[hidden] { display: none; }
+@media (hover: hover) { .jadd:hover { border-color: #5a5e66; color: var(--text); } }
 .dtext {
-  display: block; resize: none; overflow: hidden; min-height: 44px; line-height: 1.5; margin-top: 6px;
+  display: block; resize: none; overflow: hidden; min-height: 44px; line-height: 1.5; margin: 2px 0 6px;
   background: #1e2024; border: 1px solid #34373d; border-radius: 10px; font-size: 15px;
 }
 .dtext:focus { border-color: #5a5e66; background: #202226; }
