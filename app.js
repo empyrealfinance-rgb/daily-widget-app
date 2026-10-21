@@ -975,8 +975,8 @@
     return out;
   }
   const previous = (name, date) => (gymHistory()[name] || []).filter(x => x.date < date).pop() || null;
-  // gym.json: the exercises, with other names to find them by (also), size or support (group), done with your
-  // body weight (body: its kg is what you weigh, so the next set keeps today's), a line on how (how)
+  // gym.json: the exercises, with other names to find them by (also), upper body, lower body or additional
+  // (category), done with your body weight (body: its kg is what you weigh, so the next set keeps today's), a line on how (how)
   const exInfo = name => (Store.gym().exercises || []).find(e => e.name === name) || null;
   const exFits = (name, q) => [name, ...((exInfo(name) || {}).also || [])].some(n => n.toLowerCase().includes(q));
   const gymDay = d => (Core.dayOf(Store.data(), d) || {}).gym || null;
@@ -994,8 +994,9 @@
   }
 
   // Picking one: the sheet sits at the top of the screen, so the keyboard never covers the list; the search, then
-  // the exercises as buttons, just names, the latest first: size, then support. Exercises only in the history
-  // (an old gym's machines) show when the search finds them.
+  // the exercises as buttons, just names, the latest first, under tabs: gym.json's categories (upper body, lower
+  // body, additional), the last one picked kept on this device (prefs.gymTab). A search looks in all of them, under
+  // their names; exercises only in the history (an old gym's machines) show when the search finds them, last.
   function pickerView() {
     return `<div class="row"><button class="back" data-g="back" aria-label="Back">‹</button>` +
       `<input id="search" aria-label="Find or add an exercise" autocomplete="off" autocapitalize="off" value="${esc(gym.search)}"></div>` +
@@ -1010,10 +1011,19 @@
       .sort((a, b) => (last(a) < last(b) ? 1 : last(a) > last(b) ? -1 : 0));
     const today = n => (hist[n] || []).some(x => x.date === gym.date);
     const btn = n => `<button class="pk${today(n) ? ' done' : ''}" data-pick="${esc(n)}">${esc(n)}</button>`;
-    const group = g => names.filter(n => ((exInfo(n) || {}).group || 'size') === g);
-    const add = q && !names.includes(q) ? `<button class="pk new" data-pick="${esc(q)}">+ ${esc(q)}</button>` : '';
-    return (group('size').length ? `<div class="pkh">size</div><div class="pks">${group('size').map(btn).join('')}</div>` : '') +
-      (group('support').length ? `<div class="pkh">support</div><div class="pks">${group('support').map(btn).join('')}</div>` : '') +
+    const tabs = Store.gym().categories || [];
+    const catOf = n => { const c = (exInfo(n) || {}).category; return tabs.includes(c) ? c : ''; };
+    const section = (c, head) => {
+      const list = names.filter(n => catOf(n) === c);
+      return list.length ? (head ? `<div class="pkh">${esc(head)}</div>` : '') + `<div class="pks">${list.map(btn).join('')}</div>` : '';
+    };
+    if (!q) {
+      const tab = tabs.includes(prefs.gymTab) ? prefs.gymTab : (tabs[0] || '');
+      return (tabs.length ? `<div class="chips pkt">${tabs.map(c => `<button class="chip${c === tab ? ' on' : ''}" data-gtab="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : '') +
+        section(tab, '');
+    }
+    const add = !names.includes(q) ? `<button class="pk new" data-pick="${esc(q)}">+ ${esc(q)}</button>` : '';
+    return tabs.map(c => section(c, c)).join('') + section('', tabs.length ? 'other' : '') +
       (add ? `<div class="pks">${add}</div>` : '');
   }
 
@@ -1093,6 +1103,7 @@
   function gymClick(el) {
     const ds = el.dataset;
     if (ds.ex) { gym.ex = ds.ex; gym.next = null; gym.armed = -1; return renderSheet(); }
+    if (ds.gtab) { prefs.gymTab = ds.gtab; savePrefs(); $('#picklist').innerHTML = pickList(); return; }
     if (ds.pick) { gym.ex = ds.pick.trim().toLowerCase(); gym.picking = false; gym.search = ''; gym.next = null; gym.armed = -1; return renderSheet(); }
     if (ds.step) { const [f, dir] = ds.step.split(','); return step(f, +dir); }
     if ('bw' in ds) { $('#kg').value = 'BW'; gym.next = [null, parseInt($('#reps').value, 10)]; return; }
