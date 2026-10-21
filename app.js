@@ -478,13 +478,12 @@
   // a day under the field: the field keeps the focus (and the keyboard stays up)
   main.addEventListener('pointerdown', ev => { if (ev.target.closest('[data-tday]')) ev.preventDefault(); });
 
-  // A box. A powder taken shows its dose on it; drafts (2026-10-20, prefs.doseLook until he picks): a, the number
-  // in the middle, dark on the color; b, small in the corner; c, the box as a ring in the color, the number inside.
+  // A box. A powder taken shows its dose on it, in the middle, dark on the color (his pick of three, 2026-10-21).
   function box(r, c, list, color) {
     if (c.state === 'none' || c.state === 'off') return '<span class="sq"></span>';
     if (c.state === 'rest') return `<span class="sq s-rest" data-date="${c.date}" title="rest day"></span>`;
-    const dose = r.powder && c.state === 'done' && prefs.doseLook ? shortDose(c.dose) : '';
-    return `<button class="sq s-${c.state}${c.note ? ' noted' : ''}${dose ? ' dz dz-' + prefs.doseLook : ''}" style="--c:${color}" ` +
+    const dose = r.powder && c.state === 'done' ? shortDose(c.dose) : '';
+    return `<button class="sq s-${c.state}${c.note ? ' noted' : ''}${dose ? ' dz' : ''}" style="--c:${color}" ` +
       `data-id="${r.id}" data-list="${list}" data-date="${c.date}"${c.dose ? ` title="${esc(c.dose)}"` : ''}>${dose ? `<b>${dose}</b>` : ''}</button>`;
   }
 
