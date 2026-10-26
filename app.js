@@ -9,7 +9,7 @@
 //   the empty box under the to-dos                type a new to-do in place (Enter adds it, Esc drops it)
 //   +                                             a new task or supplement
 // To-dos: each on the day it's planned for (today, or a day picked), so an open one slides left as days
-// pass; a done one is ticked and crossed out, and stays until midnight. Under the lists, today: the day as
+// pass; a done one is ticked and crossed out, and makes room 15 minutes later. Under the lists, today: the day as
 // a line (sleep, screen time, client work from the laptop's time tracker) and the journal: notes with the
 // time they're about (right-click the line for a moment of the day). The chart button: everything for a
 // week, month or year.
@@ -41,6 +41,7 @@
   let deferred = false;
   const typing = () => { const a = document.activeElement; return !!a && /^(INPUT|TEXTAREA)$/.test(a.tagName); };
 
+  let doneTimer = 0;
   function render() {
     deferred = false;
     $('#title').textContent = pretty(Core.today());
@@ -55,6 +56,10 @@
     const labels = active(cfg.tasks).map(t => [t.name, Core.hint(t, data, now)])
       .concat(active(cfg.supplements).map(s => [s.name, s.dose || '']));
     const todos = Core.todosShown(Store.todo(), now), L = shown = layout(labels), dates = calendar(now, L.weeks, todos);
+    // a done one goes 15 minutes after its tick: draw again then
+    clearTimeout(doneTimer);
+    const left = todos.filter(t => t.done).map(t => (Core.realMinutes(t.done) + 15) * 60000 - Date.now());
+    if (left.length) doneTimer = setTimeout(() => (typing() || !pop.hidden ? (deferred = true) : render()), Math.max(1000, Math.min(...left) + 1000));
     const scroll = scrollState();
     const tasks = Core.rows(cfg, data, dates, now).filter(r => r.cells.some(c => c.state !== 'none' && c.state !== 'off'));
     const supps = Core.suppRows(cfg, data, dates, now);

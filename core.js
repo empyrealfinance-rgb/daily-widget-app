@@ -457,10 +457,12 @@ var Core = (function () {
   }
 
   // What's on screen: the open ones and the ones done today, oldest plan first
-  function todosShown(j, now) {
-    var out = [], l = (j && j.items) || [];
-    now = now || today();
-    for (var i = 0; i < l.length; i++) if (!l[i].done || l[i].done.slice(0, 10) >= now) out.push(l[i]);
+  // The to-dos on screen: the open ones, and a done one for 15 minutes after it was ticked, then it makes room (he
+  // asked 2026-10-20; until then a done one stayed till midnight). They all stay in todo.json.
+  var DONE_SHOWN = 15;
+  function todosShown(j, now, at) {
+    var out = [], l = (j && j.items) || [], t = realMinutes(at || stamp());
+    for (var i = 0; i < l.length; i++) if (!l[i].done || t - realMinutes(l[i].done) < DONE_SHOWN) out.push(l[i]);
     return out.sort(function (a, b) { var x = a.on + (a.t || ''), y = b.on + (b.t || ''); return x < y ? -1 : x > y ? 1 : 0; });
   }
 
@@ -632,7 +634,7 @@ var Core = (function () {
     dayOf: dayOf, entryOf: entryOf, isDone: isDone, windowOf: windowOf, cell: cell, weekCount: weekCount,
     hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, isSet: isSet, apply: apply, dayText: dayText,
     dayNotes: dayNotes, lastDose: lastDose, isConfigOp: isConfigOp, newItem: newItem, moveOp: moveOp, applyConfig: applyConfig,
-    isTodoOp: isTodoOp, applyTodo: applyTodo, newTodo: newTodo, todosShown: todosShown, stamp: stamp,
+    isTodoOp: isTodoOp, applyTodo: applyTodo, newTodo: newTodo, todosShown: todosShown, realMinutes: realMinutes, stamp: stamp,
     serializeTodo: serializeTodo, healthOps: healthOps, joinSpans: joinSpans, cardioMin: cardioMin, cardioTask: cardioTask,
     serialize: serialize, serializeConfig: serializeConfig, toB64: toB64, fromB64: fromB64, newId: newId
   };
