@@ -524,7 +524,10 @@ var Core = (function () {
     }
     return out;
   }
-  function spanMinutes(list) { var m = 0; for (var i = 0; i < list.length; i++) m += minutesOf(list[i][1]) - minutesOf(list[i][0]); return Math.round(m); }
+  // How long the stretches took, in real minutes: across the clocks changing (the last Sunday of October and of
+  // March) a night is an hour longer or shorter than its times say. (minutesOf counts on the clock face.)
+  function realMinutes(s) { return new Date(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10), +s.slice(11, 13), +s.slice(14, 16)).getTime() / 60000; }
+  function spanMinutes(list) { var m = 0; for (var i = 0; i < list.length; i++) m += realMinutes(list[i][1]) - realMinutes(list[i][0]); return Math.round(m); }
 
   // One day's heart rate samples [minutes, bpm], repeats dropped (Mi Fitness writes the same ones on every sync) ->
   // { hours: { "13": [89, 126], … }: the lowest and highest each hour, max, n (samples), from, at }. When they're
