@@ -55,6 +55,9 @@
     const active = list => (list || []).filter(t => Core.statusOn(t, now) === 'active');
     const labels = active(cfg.tasks).map(t => [t.name, Core.hint(t, data, now)])
       .concat(active(cfg.supplements).map(s => [s.name, s.dose || '']));
+    // a repeating to-do's day: add it (quiet: no second draw from inside this one)
+    const due = Core.repeatsDue(Store.todo(), now);
+    if (due.length) { const q = quiet; quiet = true; due.forEach(op => Store.change(op)); quiet = q; }
     const todos = Core.todosShown(Store.todo(), now), L = shown = layout(labels), dates = calendar(now, L.weeks, todos);
     // a done one goes 15 minutes after its tick: draw again then
     clearTimeout(doneTimer);
@@ -268,7 +271,7 @@
     const steps = {}, sleep = {}, nights = {}, notes = { steps: {}, sleep: {} };
     for (const d of dates) {
       const day = Core.dayOf(data, d);
-      if (day && day.steps) steps[d] = day.steps.n;
+      if (Core.stepsOf(day)) steps[d] = Core.stepsOf(day);
       if (day && day.sleep && day.sleep.min) { sleep[d] = day.sleep.min; nights[d] = day.sleep; }
       for (const k in (day && day.health) || {}) if (notes[k] && day.health[k].note) notes[k][d] = day.health[k].note;
     }
@@ -334,7 +337,7 @@
   function healthNotePop(el) {
     const { hrow, date } = el.dataset, day = Core.dayOf(Store.data(), date) || {};
     const cur = (day.health && day.health[hrow] && day.health[hrow].note) || '';
-    const what = hrow === 'steps' ? (day.steps ? nSteps(day.steps.n) + ' steps' : '') : (day.sleep && day.sleep.min ? 'slept ' + hm(day.sleep.min) : '');
+    const what = hrow === 'steps' ? (day.steps ? nSteps(Core.stepsOf(day)) + ' steps' : '') : (day.sleep && day.sleep.min ? 'slept ' + hm(day.sleep.min) : '');
     openPop(el, `<div class="ph"><i style="background:${hrow === 'steps' ? STEPS : SLEEP}"></i>${hrow} · ${pretty(date)}${what ? ' · ' + what : ''}</div>` +
       `<textarea rows="1">${esc(cur)}</textarea>`, {
       save: () => {
@@ -542,7 +545,7 @@
     for (const n of notes) if (n.t) line += `<button class="nmk" style="left:${pct(toMin(n.t))}" data-note="${n.id}" data-ndate="${date}" aria-label="${n.t}"></button>`;
     const sums = [
       sleep && sleep.min ? `<span>slept ${hm(sleep.min)}</span>` : '',
-      day.steps ? `<span>${day.steps.n.toLocaleString('en-US')} steps</span>` : '',
+      day.steps ? `<span>${Core.stepsOf(day).toLocaleString('en-US')} steps</span>` : '',
       heart ? (Core.cardioMin(ct, heart) != null ? `<span>cardio ${Core.cardioMin(ct, heart)} min</span>` : pulse(heart)) : '',
       ...(pc.work || []).map(w => `<span><i class="cdot" style="background:${esc(w.color)}"></i>${esc(w.client)} ${hm(w.min)}</span>`),
       pc.screen ? `<span class="muted">screen ${hm(pc.screen.min)}</span>` : '',
@@ -754,7 +757,8 @@
   function todoPop(el) {
     const t = (Store.todo().items || []).find(x => x.id === el.dataset.todo);
     if (!t) return;
-    openPop(el, `<div class="ph">to-do${t.done ? ' · done ' + pretty(t.done.slice(0, 10)) + ' ' + t.done.slice(11) : ''}</div>` +
+    const r = Core.repeatOf(Store.todo(), t);
+    openPop(el, `<div class="ph">to-do${r ? ' · every month, the ' + nth(r.day) : ''}${t.done ? ' · done ' + pretty(t.done.slice(0, 10)) + ' ' + t.done.slice(11) : ''}</div>` +
       `<input class="nm" value="${esc(t.text)}" aria-label="To-do" autocomplete="off">${dayChips(t.on)}` +
       `<div class="row end"><button class="btn small" data-pop="del">Delete</button>` +
       `<button class="btn small" data-pop="toggle">${t.done ? 'Not done' : 'Done'}</button></div>`, {
@@ -773,6 +777,7 @@
       day: pickDay,
     });
   }
+  const nth = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
   // The day chips: today, tomorrow, the rest of the coming week, and a date field for any day
   function dayChips(sel) {
     const now = Core.today();
@@ -1179,7 +1184,7 @@
         for (const w of day.pc.work || []) (out.clients[w.client] = out.clients[w.client] || { min: 0, color: w.color }).min += w.min;
       }
       if (day.sleep && day.sleep.min) { out.nights++; out.sleepMin += day.sleep.min; }
-      if (day.steps) { out.stepDays++; out.steps += day.steps.n; }
+      if (Core.stepsOf(day)) { out.stepDays++; out.steps += Core.stepsOf(day); }
       if (day.heart && Core.cardioMin(ct, day.heart) != null) { out.heartDays++; out.cardio += Core.cardioMin(ct, day.heart); }
       if (day.gym) out.gym++;
       for (const n of Core.dayNotes(data, d)) out.notes.push(Object.assign({ d }, n));
@@ -1239,7 +1244,7 @@
     }
     if (st.nights) lines.push(`Sleep: ${hm(st.sleepMin / st.nights)} on average over ${st.nights} nights`);
     if (st.gym) lines.push(`Gym: ${st.gym} sessions`);
-    if (st.stepDays) lines.push(`Steps: ${Math.round(st.steps / st.stepDays)} a day on average over ${st.stepDays} days`);
+    if (st.stepDays) lines.push(`Steps: ${Math.round(st.steps / st.stepDays)} a day on average over ${st.stepDays} days (the band's count and ${Core.HOME_STEPS} at home without it)`);
     if (st.heartDays) {
       const ct = Core.cardioTask(Store.config());
       lines.push(`Cardio (heart rate ${(ct && ct.bpm) || 110}+ bpm, Apple Health): ${Math.round(st.cardio / st.heartDays)} min a day on average over ${st.heartDays} days` +

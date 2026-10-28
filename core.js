@@ -432,10 +432,10 @@ var Core = (function () {
     return c;
   }
 
-  // ---- To-dos: todo.json = { "items": [{ id, text, on, t, done }] }. on = the day it's planned for (the day it
-  // was added, or one picked: tomorrow, a day to come), t = when it was written; done = "YYYY-MM-DD HH:MM". On
-  // screen it sits on its own day, so an open one slides left as the days pass; a done one stays until that day
-  // ends. All of them stay in the file.
+  // ---- To-dos: todo.json = { "items": [{ id, text, on, t, done, rep }], "repeat": [...] }. on = the day it's planned
+  // for (the day it was added, or one picked: tomorrow, a day to come), t = when it was written; done = "YYYY-MM-DD
+  // HH:MM"; rep = the repeating to-do it came from. On screen it sits on its own day, so an open one slides left as
+  // the days pass. All of them stay in the file.
 
   function isTodoOp(op) { return /^todo(Add|Done|Edit|Del)$/.test(op.type); }
 
@@ -444,19 +444,48 @@ var Core = (function () {
     var id = op.item ? op.item.id : op.id, i, k = -1;
     for (i = 0; i < j.items.length; i++) if (j.items[i].id === id) k = i;
     var it = k >= 0 ? j.items[k] : null;
-    if (op.type === 'todoAdd') { if (!it) j.items.push(op.item); }
+    if (op.type === 'todoAdd') { if (!it) j.items.push(op.item); if (op.item.rep) repeatMade(j, op.item); }
     else if (it && op.type === 'todoDone') { if (op.done) it.done = op.done; else delete it.done; }
     else if (it && op.type === 'todoEdit') { if (op.text) it.text = op.text; if (op.on) it.on = op.on; }
     else if (it && op.type === 'todoDel') j.items.splice(k, 1);
     return j;
   }
 
+  // Repeating to-dos (he asked 2026-10-19 and 10-21): todo.json "repeat": [{ id, text, day, last, stop }], a to-do
+  // every month on that day (the month's last day when it's shorter). On that day the app or the widget, whichever
+  // looks first, adds it as an ordinary to-do, id "<rule>-YYYY-MM", rep = the rule; the rule's last = that month, so
+  // one done or deleted doesn't come back. stop = the day it stopped (kept, not deleted). A new one, another day,
+  // stopping: ask Claude.
+  function repeatsDue(j, now) {
+    var out = [], l = (j && j.repeat) || [], m = now.slice(0, 7), i, r, on;
+    for (i = 0; i < l.length; i++) {
+      r = l[i];
+      on = m + '-' + pad(Math.min(r.day, daysInMonth(now)));
+      if (on > now || (r.last && r.last >= m) || (r.stop && r.stop <= on)) continue;
+      out.push({ type: 'todoAdd', item: { id: r.id + '-' + m, text: r.text, on: on, t: '', rep: r.id } });
+    }
+    return out;
+  }
+  function repeatMade(j, item) {
+    var l = j.repeat || [], m = item.on.slice(0, 7);
+    for (var i = 0; i < l.length; i++) if (l[i].id === item.rep && !(l[i].last >= m)) l[i].last = m;
+  }
+  function repeatOf(j, item) {
+    var l = (j && j.repeat) || [];
+    for (var i = 0; i < l.length; i++) if (item && l[i].id === item.rep) return l[i];
+    return null;
+  }
+
+  // Steps as shown: the band's count and the ~1,000 he walks at home without it (he asked 2026-10-21). The month
+  // files keep the band's count.
+  var HOME_STEPS = 1000;
+  function stepsOf(day) { return day && day.steps && day.steps.n > 0 ? day.steps.n + HOME_STEPS : null; }
+
   function newTodo(text, date) {
     var now = new Date();
     return { type: 'todoAdd', item: { id: newId(), text: text, on: date || ymd(now), t: hhmm(now) } };
   }
 
-  // What's on screen: the open ones and the ones done today, oldest plan first
   // The to-dos on screen: the open ones, and a done one for 15 minutes after it was ticked, then it makes room (he
   // asked 2026-10-20; until then a done one stayed till midnight). They all stay in todo.json.
   var DONE_SHOWN = 15;
@@ -634,7 +663,8 @@ var Core = (function () {
     dayOf: dayOf, entryOf: entryOf, isDone: isDone, windowOf: windowOf, cell: cell, weekCount: weekCount,
     hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, isSet: isSet, apply: apply, dayText: dayText,
     dayNotes: dayNotes, lastDose: lastDose, isConfigOp: isConfigOp, newItem: newItem, moveOp: moveOp, applyConfig: applyConfig,
-    isTodoOp: isTodoOp, applyTodo: applyTodo, newTodo: newTodo, todosShown: todosShown, realMinutes: realMinutes, stamp: stamp,
+    isTodoOp: isTodoOp, applyTodo: applyTodo, newTodo: newTodo, todosShown: todosShown, repeatsDue: repeatsDue,
+    repeatOf: repeatOf, stepsOf: stepsOf, HOME_STEPS: HOME_STEPS, realMinutes: realMinutes, stamp: stamp,
     serializeTodo: serializeTodo, healthOps: healthOps, joinSpans: joinSpans, cardioMin: cardioMin, cardioTask: cardioTask,
     serialize: serialize, serializeConfig: serializeConfig, toB64: toB64, fromB64: fromB64, newId: newId
   };
