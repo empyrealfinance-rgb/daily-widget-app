@@ -994,6 +994,98 @@
   const gymDay = d => (Core.dayOf(Store.data(), d) || {}).gym || null;
   const exOf = (d, name) => ((gymDay(d) || {}).ex || []).find(e => e.name === name) || null;
 
+  // ---- Gym progress (his pick of three drafts, 2026-11-02: "B", one exercise in depth). Every set as a dot (bigger
+  // = more reps), the line = each session's heaviest set, a ring = heavier than ever before; under it the period's
+  // records. Bodyweight exercises (no kg, or gym.json body: pull-ups) count reps instead of kg.
+  const prog = { ex: null, period: 'all', back: null };
+  const PERIODS = [['month', 30], ['3 months', 91], ['6 months', 182], ['all', 0]];
+  function openProgress(ex) {
+    Object.assign(prog, { ex: ex || null, back: sheetRender });
+    if (!sheetRender) openSheet(progressView);
+    else { sheetRender = progressView; sheetWide = false; renderSheet(); }
+    const on = sheetEl.querySelector('.pex .on');
+    if (on) on.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }
+  // name -> { reps, s: [[date, heaviest kg (or most reps), its reps, sets]] }, oldest first
+  function progressData() {
+    const out = {};
+    for (const [name, l] of Object.entries(gymHistory())) {
+      const all = l.map(x => ({ date: x.date, sets: (x.sets || []).filter(t => t && (t[0] != null || t[1] != null)) })).filter(x => x.sets.length);
+      const reps = !!(exInfo(name) || {}).body || all.every(x => x.sets.every(t => !(t[0] > 0)));
+      const s = [];
+      for (const x of all) {
+        if (reps) { const r = Math.max(...x.sets.map(t => t[1] || 0)); if (r > 0) s.push([x.date, r, r, x.sets]); continue; }
+        const w = x.sets.filter(t => t[0] > 0);
+        if (w.length) { const top = w.reduce((a, b) => (b[0] > a[0] || (b[0] === a[0] && (b[1] || 0) > (a[1] || 0)) ? b : a)); s.push([x.date, top[0], top[1] || 0, x.sets]); }
+      }
+      if (s.length) out[name] = { reps, s };
+    }
+    return out;
+  }
+  const dm = d => `${+d.slice(8)} ${MONTHS[+d.slice(5, 7) - 1]}`;
+  const n1 = v => String(Math.round(v * 10) / 10);
+  function progressView() {
+    const all = progressData(), names = Object.keys(all).sort((a, b) => all[b].s.length - all[a].s.length || (a < b ? -1 : 1));
+    if (!all[prog.ex]) prog.ex = names[0] || null;
+    const head = `<div class="row">${prog.back ? '<button class="back" data-p="back" aria-label="Back">‹</button>' : ''}` +
+      '<h3 class="grow">gym progress</h3><button class="x" data-close aria-label="Close">×</button></div>';
+    if (!prog.ex) return head + '<p class="muted">No sets written down yet.</p>';
+    const E = all[prog.ex], days = PERIODS.find(p => p[0] === prog.period)[1];
+    const S = days ? E.s.filter(x => x[0] > Core.addDays(Core.today(), -days)) : E.s;
+    return head +
+      `<div class="pex">${names.map(n => `<button class="chip${n === prog.ex ? ' on' : ''}" data-pex="${esc(n)}">${esc(n)}</button>`).join('')}</div>` +
+      `<div class="chips">${PERIODS.map(([k]) => `<button class="chip${k === prog.period ? ' on' : ''}" data-pp="${k}">${k}</button>`).join('')}</div>` +
+      (S.length ? progChart(E, S) + progRecords(E, S) : `<p class="muted">No ${esc(prog.ex)} in the last ${prog.period}.</p>`);
+  }
+  function progChart(E, S) {
+    const W = 488, H = 230, L = 34, R = 10, T = 12, B = 24, c = colorOf((Store.config().tasks || []).find(t => t.kind === 'gym') || {});
+    const dots = S.flatMap(x => x[3].filter(t => (E.reps ? t[1] > 0 : t[0] > 0)).map(t => [x[0], E.reps ? t[1] : t[0], t[1] || 0]));
+    let lo = Math.min(...dots.map(p => p[1])), hi = Math.max(...dots.map(p => p[1]));
+    const r = hi - lo, step = r <= 12 ? 2 : r <= 30 ? 5 : r <= 80 ? 10 : r <= 200 ? 20 : 50;
+    lo = Math.floor(lo / step) * step; hi = Math.max(lo + step, Math.ceil(hi / step) * step);
+    const tm = d => Core.parse(d).getTime(), t0 = tm(S[0][0]), t1 = tm(S[S.length - 1][0]);
+    const X = d => (t1 === t0 ? (L + W - R) / 2 : L + (tm(d) - t0) / (t1 - t0) * (W - L - R)), Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+    let g = '';
+    for (let v = lo; v <= hi; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" class="pg"/><text x="${L - 6}" y="${Y(v) + 4}" class="pt" text-anchor="end">${v}</text>`;
+    // under it: the months, or for a short span the Mondays
+    const long = (t1 - t0) / 864e5 > 50;
+    for (let d = S[0][0]; d <= S[S.length - 1][0]; d = Core.addDays(d, 1)) {
+      if (long ? d.slice(8) === '01' : Core.weekday(d) === 1) g += `<text x="${X(d)}" y="${H - 6}" class="pt" text-anchor="middle">${long ? MONTHS[+d.slice(5, 7) - 1] : dm(d)}</text>`;
+    }
+    for (const p of dots) g += `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${(1.6 + Math.min(p[2], 20) / 6).toFixed(1)}" fill="${c}" opacity=".22"/>`;
+    g += `<polyline fill="none" stroke="${c}" stroke-width="1.8" stroke-linejoin="round" points="${S.map(x => X(x[0]).toFixed(1) + ',' + Y(x[1]).toFixed(1)).join(' ')}"/>`;
+    let best = Math.max(-1, ...E.s.filter(x => x[0] < S[0][0]).map(x => x[1]));
+    for (const x of S) {
+      const ring = best >= 0 && x[1] > best;
+      best = Math.max(best, x[1]);
+      g += `<circle cx="${X(x[0])}" cy="${Y(x[1])}" r="2.6" fill="${c}"><title>${dm(x[0])}: ${E.reps ? x[1] + ' reps' : n1(x[1]) + ' kg × ' + x[2]}</title></circle>` +
+        (ring ? `<circle cx="${X(x[0])}" cy="${Y(x[1])}" r="5.5" fill="none" stroke="${c}" stroke-width="1.2"/>` : '');
+    }
+    return `<svg class="pchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(prog.ex)}: the heaviest set of each session">${g}</svg>`;
+  }
+  function progRecords(E, S) {
+    const z = S[S.length - 1], a = S[0], set = x => (E.reps ? `${x[1]} reps` : `${n1(x[1])} kg × ${x[2]}`);
+    const top = S.reduce((p, x) => (x[1] > p[1] || (x[1] === p[1] && x[2] > p[2]) ? x : p));
+    const rows = [[E.reps ? 'most reps' : 'heaviest', `${set(top)} · ${dm(top[0])}`], ['first', `${set(a)} · ${dm(a[0])}`], ['last', `${set(z)} · ${dm(z[0])}`]];
+    if (!E.reps) {
+      const e1 = x => x[1] * (1 + x[2] / 30), b1 = S.reduce((p, x) => (e1(x) > e1(p) ? x : p));
+      const vol = x => x[3].reduce((n, t) => n + (t[0] > 0 ? t[0] * (t[1] || 0) : 0), 0), bv = S.reduce((p, x) => (vol(x) > vol(p) ? x : p));
+      rows.push(['one rep, estimated', `${Math.round(e1(b1))} kg · ${dm(b1[0])}`], ['most lifted in a session', `${Math.round(vol(bv)).toLocaleString('en-US')} kg · ${dm(bv[0])}`]);
+    }
+    rows.push(['sessions', String(S.length)]);
+    return `<div class="prec">${rows.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('')}</div>`;
+  }
+  function progClick(el) {
+    const ds = el.dataset, strip = sheetEl.querySelector('.pex'), left = strip ? strip.scrollLeft : 0;
+    if (ds.p === 'back') { sheetRender = prog.back; sheetWide = prog.back === analysisView; prog.back = null; return renderSheet(); }
+    if (ds.pex) prog.ex = ds.pex;
+    else if (ds.pp) prog.period = ds.pp;
+    else return;
+    renderSheet();
+    const s2 = sheetEl.querySelector('.pex');
+    if (s2) s2.scrollLeft = left;
+  }
+
   function gymView() {
     if (gym.ex) return exerciseView();
     if (gym.picking) return pickerView();
@@ -1002,7 +1094,8 @@
       ex.map(e => `<button class="exrow" data-ex="${esc(e.name)}">${esc(e.name)}<small>${esc(fmtSets(e.sets))}${e.note ? ' · ' + esc(e.note) : ''}</small></button>`).join('') +
       '<button class="btn wide primary big" data-g="pick">+ exercise</button>' +
       `<label>note<input id="gnote" value="${esc(g && g.note)}"></label>` +
-      (!g ? '<button class="btn wide" data-g="went">Went, no details</button>' : !ex.length ? '<button class="btn wide" data-g="notgym">Not a gym day</button>' : '');
+      (!g ? '<button class="btn wide" data-g="went">Went, no details</button>' : !ex.length ? '<button class="btn wide" data-g="notgym">Not a gym day</button>' : '') +
+      '<button class="btn wide" data-g="progress">progress</button>';
   }
 
   // Picking one: the sheet sits at the top of the screen, so the keyboard never covers the list; the search, then
@@ -1064,7 +1157,7 @@
     const e = exOf(gym.date, gym.ex), sets = (e && e.sets) || [], prev = previous(gym.ex, gym.date);
     const next = gym.next || prefill(gym.ex, sets, prev), how = (exInfo(gym.ex) || {}).how;
     return `<div class="row"><button class="back" data-g="back" aria-label="Back">‹</button><h3 class="grow">${esc(gym.ex)}</h3>` +
-      `<button class="x" data-close aria-label="Close">×</button></div>` +
+      `<button class="chip" data-g="progress">progress</button><button class="x" data-close aria-label="Close">×</button></div>` +
       (how ? `<p class="small how">${esc(how)}</p>` : '') +
       `<p class="muted small">${prev ? `last time, ${rel(prev.date)}: ${esc(fmtSets(prev.sets))}${prev.note ? ' · ' + esc(prev.note) : ''}` : 'first time'}</p>` +
       `<ol class="sets">${sets.map((s, i) => `<li><span><span class="n">${i + 1}</span>${kgText(s[0])} × ${s[1] ?? '?'}</span>` +
@@ -1122,6 +1215,7 @@
     if (ds.del) return deleteSet(+ds.del);
     switch (ds.g) {
       case 'pick': gym.picking = true; gym.search = ''; return renderSheet();
+      case 'progress': return openProgress(gym.ex);
       case 'back': if (gym.ex) gym.ex = null; else gym.picking = false; gym.next = null; return renderSheet();
       case 'addset': return addSet();
       case 'went': Store.change({ type: 'gymDay', date: gym.date, on: true }); return renderSheet();
@@ -1230,7 +1324,8 @@
       list('to-dos still open', st.todosOpen.map(t => `<div class="aline"><span class="jt">${pretty(t.on)}</span>${esc(t.text)}</div>`).join('')) +
       list('journal', st.notes.map(n => `<div class="aline"><span class="jt">${pretty(n.d)}${n.t ? ' ' + n.t : ''}</span>${esc(n.text)}</div>`).join('')) +
       list('notes on boxes', st.boxNotes.map(n => `<div class="aline"><span class="jt">${pretty(n.d)}</span>${esc(n.name)}: ${esc(n.text)}</div>`).join('')) +
-      '<div class="row end"><span class="muted small acopied"></span><button class="btn" data-a="copy">Copy for Claude</button></div>';
+      '<div class="row end"><span class="muted small acopied"></span><button class="btn" data-a="gym">gym progress</button>' +
+      '<button class="btn" data-a="copy">Copy for Claude</button></div>';
   }
 
   // The period as plain text, to paste into a chat with Claude
@@ -1262,6 +1357,7 @@
 
   async function anaClick(el) {
     const a = el.dataset.a;
+    if (a === 'gym') return openProgress(null);
     if (a === 'week' || a === 'month' || a === 'year') ana.period = a;
     else if (a === 'prev' || a === 'next') shiftPeriod(a === 'prev' ? -1 : 1);
     else if (a === 'copy') {
@@ -1321,7 +1417,8 @@
     const el = ev.target.closest('button');
     if (!el) return;
     if ('close' in el.dataset) return closeSheet();
-    if (sheetRender === gymView) gymClick(el); else if (sheetRender === analysisView) anaClick(el); else settingsClick(el);
+    if (sheetRender === gymView) gymClick(el); else if (sheetRender === analysisView) anaClick(el);
+    else if (sheetRender === progressView) progClick(el); else settingsClick(el);
   });
   sheetEl.addEventListener('input', ev => {
     const id = ev.target.id;

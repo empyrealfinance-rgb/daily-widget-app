@@ -272,6 +272,17 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 #sheet label.check input { width: auto; margin: 0; accent-color: var(--primary-line); }
 .arow { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--line); }
 
+/* ---- gym progress */
+.pex { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.pex::-webkit-scrollbar { display: none; }
+.pex .chip { flex: none; white-space: nowrap; }
+.pchart { display: block; width: 100%; height: auto; margin-top: 12px; }
+.pchart .pg { stroke: var(--line); }
+.pchart .pt { fill: var(--muted); font-size: 11px; }
+.prec { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin-top: 12px; font-size: 14px; }
+.prec span:nth-child(odd) { color: var(--muted); }
+.prec span:nth-child(even) { text-align: right; }
+
 /* ---- analysis */
 #sheet .panel.wide { max-width: 980px; }
 .aperiod { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
