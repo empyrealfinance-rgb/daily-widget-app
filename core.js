@@ -506,7 +506,8 @@ var Core = (function () {
   // with something, [how many, done, open] (today: with the open ones from earlier days; the monthly ones still to
   // come counted on their day), and the list of day sel: today's = todosShown up to today, another day's = all of
   // its own, oldest written first; then the monthly ones to come on sel ({ id: the rule's, text, on, rep: true }).
-  function todoDays(j, now, sel, first, last) {
+  // allDone: today's list with all that were done today (the widget, on a click on today: 2026-11-02).
+  function todoDays(j, now, sel, first, last, allDone) {
     var l = (j && j.items) || [], rep = (j && j.repeat) || [], days = {}, list = [], i, t, k, c, m, on, r;
     function count(d) { return days[d] || (days[d] = [0, 0, 0]); }
     for (i = 0; i < l.length; i++) {
@@ -516,6 +517,7 @@ var Core = (function () {
     }
     var shown = sel === now ? todosShown(j, now) : l.slice().sort(function (a, b) { var x = a.t || '', y = b.t || ''; return x < y ? -1 : x > y ? 1 : 0; });
     for (i = 0; i < shown.length; i++) if (sel === now ? shown[i].on <= now : shown[i].on === sel) list.push(shown[i]);
+    if (allDone && sel === now) for (i = 0; i < l.length; i++) if (l[i].done && l[i].done.slice(0, 10) === now && list.indexOf(l[i]) < 0) list.push(l[i]);
     for (i = 0; i < rep.length; i++) {
       r = rep[i];
       for (m = first.slice(0, 7); m <= last.slice(0, 7); m = addDays(m + '-28', 7).slice(0, 7)) {
