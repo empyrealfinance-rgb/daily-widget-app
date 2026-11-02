@@ -749,7 +749,8 @@
     });
   }
 
-  // To-dos: the box ticks; the words (or right-click) open it: change the words, done / not done, Delete
+  // To-dos: the box ticks; the words (or right-click) open it: change the words or the day, Save; Mark done / not
+  // done; Delete. (Until 2026-11-02 the tick button said "Done", which read as "done changing": changes got ticked.)
   function todoTap(el) {
     const t = (Store.todo().items || []).find(x => x.id === el.dataset.todo);
     if (t) Store.change({ type: 'todoDone', id: t.id, done: t.done ? null : Core.stamp() });
@@ -761,7 +762,8 @@
     openPop(el, `<div class="ph">to-do${r ? ' · every month, the ' + nth(r.day) : ''}${t.done ? ' · done ' + pretty(t.done.slice(0, 10)) + ' ' + t.done.slice(11) : ''}</div>` +
       `<input class="nm" value="${esc(t.text)}" aria-label="To-do" autocomplete="off">${dayChips(t.on)}` +
       `<div class="row end"><button class="btn small" data-pop="del">Delete</button>` +
-      `<button class="btn small" data-pop="toggle">${t.done ? 'Not done' : 'Done'}</button></div>`, {
+      `<button class="btn small" data-pop="toggle">${t.done ? 'Mark not done' : 'Mark done'}</button>` +
+      `<button class="btn small primary" data-pop="ok">Save</button></div>`, {
       save: () => {
         const text = pop.querySelector('.nm').value.trim(), on = pickedDay(t.on), op = { type: 'todoEdit', id: t.id };
         if (text && text !== t.text) op.text = text;
@@ -769,6 +771,7 @@
         if (op.text || op.on) Store.change(op);
       },
       toggle: () => { closePop(true); Store.change({ type: 'todoDone', id: t.id, done: t.done ? null : Core.stamp() }); },
+      ok: () => closePop(true),
       del: b => {
         if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Delete?'; return; }
         Store.change({ type: 'todoDel', id: t.id });
