@@ -380,7 +380,7 @@ var Core = (function () {
   //   { type: 'add', list, item }                                          a new task or supplement
   //   { type: 'order', list, ids }                                         the list in this order
 
-  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename' || op.type === 'add' || op.type === 'order'; }
+  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename' || op.type === 'add' || op.type === 'order' || op.type === 'progress'; }
 
   // Moving an item up (dir -1) or down (1) past the next one on screen (archived ones stay where they are)
   function moveOp(c, list, id, dir, date) {
@@ -414,6 +414,8 @@ var Core = (function () {
 
   function applyConfig(c, op) {
     var i;
+    // the gym progress page: his order of the exercises, how many on its first page
+    if (op.type === 'progress') { c.progress = { order: op.order, first: op.first }; return c; }
     if (op.type === 'order') {
       var l = c[op.list] || [], byId = {}, out = [];
       for (i = 0; i < l.length; i++) byId[l[i].id] = l[i];

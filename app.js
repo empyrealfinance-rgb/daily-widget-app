@@ -72,7 +72,9 @@
       supps: supps.length ? ledger('supps', supps, dates, L) : '', health: health.length ? ledger('health', health, dates, L) : '',
       today: todayCard(data, now),
     };
-    main.innerHTML = cardOrder().map(k => cards[k]).join('');
+    const nArch = archivedItems(cfg, now).length;
+    main.innerHTML = cardOrder().map(k => cards[k]).join('') +
+      (nArch ? `<button class="arcbtn" data-act="archive">archive · ${nArch}</button>` : '');
     restoreScroll(scroll);
     homeKeeper.disconnect();
     main.querySelectorAll('.ledger .scroller').forEach(sc => homeKeeper.observe(sc));
@@ -928,6 +930,7 @@
     if (ds.info) return namePop(el);
     if (ds.add) return addPop(el);
     if (ds.act === 'settings') return openSettings();
+    if (ds.act === 'archive') return openSheet(archiveView);
   });
 
   // ---- Panels (gym, settings): a sheet over the page
@@ -995,16 +998,18 @@
   const exOf = (d, name) => ((gymDay(d) || {}).ex || []).find(e => e.name === name) || null;
 
   // ---- Gym progress (his pick of three drafts, 2026-11-02: "B", one exercise in depth). Every set as a dot (bigger
-  // = more reps), the line = each session's heaviest set, a ring = heavier than ever before; under it the period's
-  // records. Bodyweight exercises (no kg, or gym.json body: pull-ups) count reps instead of kg.
-  const prog = { ex: null, period: 'all', back: null };
-  const PERIODS = [['month', 30], ['3 months', 91], ['6 months', 182], ['all', 0]];
+  // = more reps), the line = each session's heaviest set, a ring = heavier than ever before; under it the records.
+  // Bodyweight exercises (no kg, or gym.json body: pull-ups) count reps instead of kg. His order and how many are
+  // on the first page (the rest under "more") are in config.json "progress", so both devices show the same; each
+  // exercise has its own color, by its place in that order (2026-11-02: "only a few on the first page", "each
+  // exercise a different color", 3 months or all time only).
+  const prog = { ex: null, period: 'all time', back: null, more: false };
+  const PERIODS = [['3 months', 91], ['all time', 0]];
+  const PCOLORS = ['#5DCAA5', '#7FA7D9', '#EFC26B', '#ED93B1', '#AFA9EC', '#F0997B', '#9FD36B', '#6CC4D4', '#D9A0E8', '#E8D36B', '#C4A98A', '#8FB8A8'];
   function openProgress(ex) {
-    Object.assign(prog, { ex: ex || null, back: sheetRender });
+    Object.assign(prog, { ex: ex || null, back: sheetRender, more: false });
     if (!sheetRender) openSheet(progressView);
     else { sheetRender = progressView; sheetWide = false; renderSheet(); }
-    const on = sheetEl.querySelector('.pex .on');
-    if (on) on.scrollIntoView({ block: 'nearest', inline: 'center' });
   }
   // name -> { reps, s: [[date, heaviest kg (or most reps), its reps, sets]] }, oldest first
   function progressData() {
@@ -1022,23 +1027,39 @@
     }
     return out;
   }
+  // His order (config "progress"), then the rest, most done first; the first `first` of them on the first page
+  function progOrder(all) {
+    const p = Store.config().progress || {}, order = (p.order || []).filter(n => all[n]);
+    for (const n of Object.keys(all).sort((a, b) => all[b].s.length - all[a].s.length || (a < b ? -1 : 1))) if (!order.includes(n)) order.push(n);
+    return { order, first: Math.min(p.first ?? 5, order.length) };
+  }
+  const pcolor = (order, n) => PCOLORS[Math.max(0, order.indexOf(n)) % PCOLORS.length];
   const dm = d => `${+d.slice(8)} ${MONTHS[+d.slice(5, 7) - 1]}`;
   const n1 = v => String(Math.round(v * 10) / 10);
   function progressView() {
-    const all = progressData(), names = Object.keys(all).sort((a, b) => all[b].s.length - all[a].s.length || (a < b ? -1 : 1));
-    if (!all[prog.ex]) prog.ex = names[0] || null;
+    const all = progressData(), { order, first } = progOrder(all);
+    if (!all[prog.ex]) prog.ex = order[0] || null;
     const head = `<div class="row">${prog.back ? '<button class="back" data-p="back" aria-label="Back">‹</button>' : ''}` +
       '<h3 class="grow">gym progress</h3><button class="x" data-close aria-label="Close">×</button></div>';
     if (!prog.ex) return head + '<p class="muted">No sets written down yet.</p>';
+    const chip = n => `<button class="chip pch${n === prog.ex ? ' on' : ''}" data-pex="${esc(n)}" style="--c:${pcolor(order, n)}"><i></i>${esc(n)}</button>`;
+    const shown = order.slice(0, first), extra = shown.includes(prog.ex) ? [] : [prog.ex];
+    const row = (n, i) => `<div class="prow"><button class="pname${n === prog.ex ? ' on' : ''}" data-pex="${esc(n)}" style="--c:${pcolor(order, n)}"><i></i>${esc(n)}</button>` +
+      `<button class="pmv" data-pmv="${esc(n)}" data-dir="-1" aria-label="Up"${i ? '' : ' disabled'}>↑</button>` +
+      `<button class="pmv" data-pmv="${esc(n)}" data-dir="1" aria-label="Down"${i < order.length - 1 ? '' : ' disabled'}>↓</button>` +
+      `<button class="pmv${i < first ? ' on' : ''}" data-pst="${esc(n)}" aria-label="${i < first ? 'Off the first page' : 'On the first page'}">${i < first ? '★' : '☆'}</button></div>`;
     const E = all[prog.ex], days = PERIODS.find(p => p[0] === prog.period)[1];
     const S = days ? E.s.filter(x => x[0] > Core.addDays(Core.today(), -days)) : E.s;
     return head +
-      `<div class="pex">${names.map(n => `<button class="chip${n === prog.ex ? ' on' : ''}" data-pex="${esc(n)}">${esc(n)}</button>`).join('')}</div>` +
-      `<div class="chips">${PERIODS.map(([k]) => `<button class="chip${k === prog.period ? ' on' : ''}" data-pp="${k}">${k}</button>`).join('')}</div>` +
-      (S.length ? progChart(E, S) + progRecords(E, S) : `<p class="muted">No ${esc(prog.ex)} in the last ${prog.period}.</p>`);
+      `<div class="pex">${[...shown, ...extra].map(chip).join('')}` +
+      `<button class="chip" data-pmore>${prog.more ? 'done' : `more · ${order.length - first}`}</button></div>` +
+      (prog.more ? `<div class="plist"><h4>first page</h4>${order.slice(0, first).map((n, i) => row(n, i)).join('')}` +
+        `<h4>more</h4>${order.slice(first).map((n, i) => row(n, i + first)).join('')}</div>` :
+        `<div class="chips">${PERIODS.map(([k]) => `<button class="chip${k === prog.period ? ' on' : ''}" data-pp="${k}">${k}</button>`).join('')}</div>` +
+        (S.length ? progChart(E, S, pcolor(order, prog.ex)) + progRecords(E, S) : `<p class="muted">No ${esc(prog.ex)} in the last 3 months.</p>`));
   }
-  function progChart(E, S) {
-    const W = 488, H = 230, L = 34, R = 10, T = 12, B = 24, c = colorOf((Store.config().tasks || []).find(t => t.kind === 'gym') || {});
+  function progChart(E, S, c) {
+    const W = 488, H = 230, L = 34, R = 10, T = 12, B = 24;
     const dots = S.flatMap(x => x[3].filter(t => (E.reps ? t[1] > 0 : t[0] > 0)).map(t => [x[0], E.reps ? t[1] : t[0], t[1] || 0]));
     let lo = Math.min(...dots.map(p => p[1])), hi = Math.max(...dots.map(p => p[1]));
     const r = hi - lo, step = r <= 12 ? 2 : r <= 30 ? 5 : r <= 80 ? 10 : r <= 200 ? 20 : 50;
@@ -1075,15 +1096,34 @@
     rows.push(['sessions', String(S.length)]);
     return `<div class="prec">${rows.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('')}</div>`;
   }
+  // ↑ ↓ swap with the neighbour (across the line: in and out of the first page); ★ on / off the first page
+  function progMove(name, dir) {
+    const { order, first } = progOrder(progressData()), i = order.indexOf(name);
+    let f = first;
+    if (!dir) {
+      order.splice(i, 1);
+      if (i < f) order.splice(--f, 0, name); else order.splice(f++, 0, name);
+    } else {
+      const j = i + dir;
+      if (j < 0 || j >= order.length) return;
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    Store.change({ type: 'progress', order, first: f });
+  }
   function progClick(el) {
-    const ds = el.dataset, strip = sheetEl.querySelector('.pex'), left = strip ? strip.scrollLeft : 0;
+    const ds = el.dataset, panel = sheetEl.querySelector('.panel'), top = panel ? panel.scrollTop : 0;
+    const strip = sheetEl.querySelector('.pex'), left = strip ? strip.scrollLeft : 0;
     if (ds.p === 'back') { sheetRender = prog.back; sheetWide = prog.back === analysisView; prog.back = null; return renderSheet(); }
-    if (ds.pex) prog.ex = ds.pex;
+    if (ds.pex) { prog.ex = ds.pex; if (prog.more && el.matches('.pname')) prog.more = false; }
     else if (ds.pp) prog.period = ds.pp;
+    else if ('pmore' in ds) prog.more = !prog.more;
+    else if (ds.pmv) progMove(ds.pmv, +ds.dir);
+    else if (ds.pst) progMove(ds.pst, 0);
     else return;
     renderSheet();
-    const s2 = sheetEl.querySelector('.pex');
-    if (s2) s2.scrollLeft = left;
+    const p2 = sheetEl.querySelector('.panel'), s2 = sheetEl.querySelector('.pex');
+    if (p2 && (ds.pmv || ds.pst)) p2.scrollTop = top;
+    if (s2) s2.scrollLeft = ds.pex || ds.pp ? left : 0;
   }
 
   function gymView() {
@@ -1373,14 +1413,33 @@
     renderSheet();
   }
 
-  // ---- Settings: token, this device, colors, archived things
+  // ---- The archive: what's archived or paused, to bring back (2026-11-02: a button at the bottom of the page; it
+  // was in the settings, "clumsy", "clutters space there")
+
+  const archivedItems = (cfg, now) => [...(cfg.tasks || []).map(t => ['tasks', t]), ...(cfg.supplements || []).map(t => ['supplements', t])]
+    .filter(([, t]) => { const x = Core.statusOn(t, now); return x && x !== 'active'; });
+  function archiveView() {
+    const now = Core.today(), l = archivedItems(Store.config(), now);
+    const since = t => { const h = t.status || [], last = h[h.length - 1]; return last ? ` <span class="muted small">since ${dm(last[0])}</span>` : ''; };
+    const part = list => {
+      const rows = l.filter(([k]) => k === list);
+      return rows.length ? `<h4>${list}</h4>` + rows.map(([k, t]) => `<div class="arow"><span><i class="cdot" style="background:${colorOf(t)}"></i>` +
+        `${esc(t.name)}${since(t)}</span><button class="btn small" data-r="${k}" data-id="${t.id}">Bring back</button></div>`).join('') : '';
+    };
+    return sheetHead('archive') + (l.length ? part('tasks') + part('supplements') : '<p class="muted">Nothing archived.</p>');
+  }
+  function archiveClick(el) {
+    if (!el.dataset.r) return;
+    Store.change({ type: 'status', list: el.dataset.r, id: el.dataset.id, date: Core.today(), status: 'active' });
+    if (archivedItems(Store.config(), Core.today()).length) renderSheet(); else closeSheet();
+  }
+
+  // ---- Settings: token, this device, colors
 
   function openSettings() { openSheet(settingsView); }
 
   function settingsView() {
-    const s = Store.settings, st = Store.status(), cfg = Store.config(), now = Core.today();
-    const archived = [...(cfg.tasks || []).map(t => ['tasks', t]), ...(cfg.supplements || []).map(t => ['supplements', t])]
-      .filter(([, t]) => { const x = Core.statusOn(t, now); return x && x !== 'active'; });
+    const s = Store.settings, st = Store.status();
     const last = st.last ? `Last synced ${Core.hhmm(new Date(st.last))}.` : '';
     return sheetHead('Settings') +
       (Store.LOCAL ? '<p class="muted small">Local test server: no token needed, data stays on this PC.</p>' :
@@ -1392,8 +1451,6 @@
       `<label>This device<input id="device" value="${esc(s.device)}"></label>` +
       `<label class="check"><input type="checkbox" id="colors"${prefs.colors ? ' checked' : ''}> A color per task (off: all green)</label>` +
       '<p class="muted small">To move a card, hold its title for half a second, then drag it. The order stays on this device.</p>' +
-      (archived.length ? '<h4>Archived</h4>' + archived.map(([list, t]) =>
-        `<div class="arow"><span>${esc(t.name)}</span><button class="btn small" data-s="restore" data-list="${list}" data-id="${t.id}">Restore</button></div>`).join('') : '') +
       `<p class="muted small">${st.error ? esc(st.error) + '. ' : ''}${last} ${Store.waiting() ? Store.waiting() + ' changes waiting.' : ''}</p>` +
       '<div class="row end"><button class="btn" data-s="sync">Sync now</button><button class="btn primary" data-s="save">Save</button></div>';
   }
@@ -1401,9 +1458,6 @@
   function settingsClick(el) {
     switch (el.dataset.s) {
       case 'sync': Store.sync(); return closeSheet();
-      case 'restore':
-        Store.change({ type: 'status', list: el.dataset.list, id: el.dataset.id, date: Core.today(), status: 'active' });
-        return renderSheet();
       case 'save': {
         const tok = $('#token');
         Store.setSettings({ device: $('#device').value.trim() || Store.settings.device, ...(tok ? { token: tok.value.trim() } : {}) });
@@ -1418,7 +1472,7 @@
     if (!el) return;
     if ('close' in el.dataset) return closeSheet();
     if (sheetRender === gymView) gymClick(el); else if (sheetRender === analysisView) anaClick(el);
-    else if (sheetRender === progressView) progClick(el); else settingsClick(el);
+    else if (sheetRender === progressView) progClick(el); else if (sheetRender === archiveView) archiveClick(el); else settingsClick(el);
   });
   sheetEl.addEventListener('input', ev => {
     const id = ev.target.id;

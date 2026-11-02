@@ -276,6 +276,16 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .pex { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
 .pex::-webkit-scrollbar { display: none; }
 .pex .chip { flex: none; white-space: nowrap; }
+.pch i, .pname i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); margin-right: 6px; vertical-align: 1px; }
+.pch.on { border-color: var(--c); }
+.plist h4 { margin: 14px 0 4px; }
+.prow { display: flex; align-items: center; gap: 4px; border-top: 1px solid var(--line); padding: 3px 0; }
+.pname { flex: 1; text-align: left; background: none; border: 0; padding: 7px 0; font-size: 15px; color: var(--text); }
+.pname.on { color: var(--c); }
+.pmv { background: none; border: 1px solid var(--line); border-radius: 8px; width: 34px; height: 30px; color: var(--muted); font-size: 15px; }
+.pmv:disabled { opacity: .3; }
+.pmv.on { color: #EFC26B; }
+.arcbtn { display: block; margin: 4px auto 24px; background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 16px; color: var(--muted); font-size: 13px; }
 .pchart { display: block; width: 100%; height: auto; margin-top: 12px; }
 .pchart .pg { stroke: var(--line); }
 .pchart .pt { fill: var(--muted); font-size: 11px; }
