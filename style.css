@@ -273,9 +273,8 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .arow { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--line); }
 
 /* ---- gym progress */
-.pex { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
-.pex::-webkit-scrollbar { display: none; }
-.pex .chip { flex: none; white-space: nowrap; }
+.pex { display: flex; flex-wrap: wrap; gap: 6px; }
+.pex .chip { white-space: nowrap; }
 .pch i, .pname i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); margin-right: 6px; vertical-align: 1px; }
 .pch.on { border-color: var(--c); }
 .plist h4 { margin: 14px 0 4px; }
@@ -285,7 +284,9 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .pmv { background: none; border: 1px solid var(--line); border-radius: 8px; width: 34px; height: 30px; color: var(--muted); font-size: 15px; }
 .pmv:disabled { opacity: .3; }
 .pmv.on { color: #EFC26B; }
-.arcbtn { display: block; margin: 4px auto 24px; background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 16px; color: var(--muted); font-size: 13px; }
+.pagebtns { display: flex; justify-content: center; align-items: center; gap: 10px; margin: 4px 0 24px; }
+.gymbtn { background: color-mix(in srgb, var(--c) 22%, transparent); border: 1px solid var(--c); border-radius: 999px; padding: 8px 18px; color: #e6f5ee; font-size: 14px; font-weight: 600; }
+.arcbtn { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 16px; color: var(--muted); font-size: 13px; }
 .pchart { display: block; width: 100%; height: auto; margin-top: 12px; }
 .pchart .pg { stroke: var(--line); }
 .pchart .pt { fill: var(--muted); font-size: 11px; }

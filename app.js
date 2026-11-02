@@ -73,8 +73,10 @@
       today: todayCard(data, now),
     };
     const nArch = archivedItems(cfg, now).length;
-    main.innerHTML = cardOrder().map(k => cards[k]).join('') +
-      (nArch ? `<button class="arcbtn" data-act="archive">archive · ${nArch}</button>` : '');
+    const gymTask = (cfg.tasks || []).find(t => t.kind === 'gym');
+    main.innerHTML = cardOrder().map(k => cards[k]).join('') + '<div class="pagebtns">' +
+      `<button class="gymbtn" data-act="progress" style="--c:${gymTask ? colorOf(gymTask) : GREEN}">gym progress</button>` +
+      (nArch ? `<button class="arcbtn" data-act="archive">archive · ${nArch}</button>` : '') + '</div>';
     restoreScroll(scroll);
     homeKeeper.disconnect();
     main.querySelectorAll('.ledger .scroller').forEach(sc => homeKeeper.observe(sc));
@@ -931,6 +933,7 @@
     if (ds.add) return addPop(el);
     if (ds.act === 'settings') return openSettings();
     if (ds.act === 'archive') return openSheet(archiveView);
+    if (ds.act === 'progress') return openProgress(null);
   });
 
   // ---- Panels (gym, settings): a sheet over the page
@@ -1112,7 +1115,6 @@
   }
   function progClick(el) {
     const ds = el.dataset, panel = sheetEl.querySelector('.panel'), top = panel ? panel.scrollTop : 0;
-    const strip = sheetEl.querySelector('.pex'), left = strip ? strip.scrollLeft : 0;
     if (ds.p === 'back') { sheetRender = prog.back; sheetWide = prog.back === analysisView; prog.back = null; return renderSheet(); }
     if (ds.pex) { prog.ex = ds.pex; if (prog.more && el.matches('.pname')) prog.more = false; }
     else if (ds.pp) prog.period = ds.pp;
@@ -1121,9 +1123,8 @@
     else if (ds.pst) progMove(ds.pst, 0);
     else return;
     renderSheet();
-    const p2 = sheetEl.querySelector('.panel'), s2 = sheetEl.querySelector('.pex');
+    const p2 = sheetEl.querySelector('.panel');
     if (p2 && (ds.pmv || ds.pst)) p2.scrollTop = top;
-    if (s2) s2.scrollLeft = ds.pex || ds.pp ? left : 0;
   }
 
   function gymView() {
@@ -1134,8 +1135,7 @@
       ex.map(e => `<button class="exrow" data-ex="${esc(e.name)}">${esc(e.name)}<small>${esc(fmtSets(e.sets))}${e.note ? ' · ' + esc(e.note) : ''}</small></button>`).join('') +
       '<button class="btn wide primary big" data-g="pick">+ exercise</button>' +
       `<label>note<input id="gnote" value="${esc(g && g.note)}"></label>` +
-      (!g ? '<button class="btn wide" data-g="went">Went, no details</button>' : !ex.length ? '<button class="btn wide" data-g="notgym">Not a gym day</button>' : '') +
-      '<button class="btn wide" data-g="progress">progress</button>';
+      (!g ? '<button class="btn wide" data-g="went">Went, no details</button>' : !ex.length ? '<button class="btn wide" data-g="notgym">Not a gym day</button>' : '');
   }
 
   // Picking one: the sheet sits at the top of the screen, so the keyboard never covers the list; the search, then
