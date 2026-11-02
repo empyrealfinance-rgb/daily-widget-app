@@ -217,8 +217,9 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 @media (hover: hover) { .addb:hover { color: var(--text); } }
 
 /* ---- today: the day as a line (sleep, screen, client work), then the day's note */
-.today .th { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
-.today .sums { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
+.today .th, .gymc .th { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.gymc .th { margin-bottom: 4px; }
+.today .sums, .gymc .sums { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
 .cdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
 .dline {
   position: relative; height: 16px; border-radius: 0;
@@ -309,6 +310,15 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 #sheet label.check { display: flex; gap: 10px; align-items: center; color: var(--text); font-size: 14px; margin-top: 16px; }
 #sheet label.check input { width: auto; margin: 0; accent-color: var(--primary-line); }
 .arow { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--line); }
+
+/* ---- the gym card: today's exercises as bars (the gym's color at the edge), + exercise, progress */
+.gx { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 30px; margin-top: 5px; padding: 4px 10px; border: 0;
+  background: rgba(227, 227, 229, .12); box-shadow: inset 3px 0 0 var(--c); text-align: left; color: #E3E3E5; }
+.gx span { flex: none; }
+.gx small { flex: 1; min-width: 0; text-align: right; color: rgba(227, 227, 229, .7); font-size: 12.5px; }
+.gxb { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.gxb .tdnew { height: 30px; padding: 0 10px; text-align: left; border: 0; background: none; color: rgba(227, 227, 229, .55);
+  box-shadow: inset 0 0 0 1px rgba(227, 227, 229, .22); }
 
 /* ---- gym progress */
 .pex { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -63,7 +63,7 @@
     const supps = Core.suppRows(cfg, data, dates, now);
     const health = healthRows(data, dates, now);
     const cards = {
-      todo: todoCard(now), screen: screenCard(data, now), today: todayCard(data, now),
+      todo: todoCard(now), screen: screenCard(data, now), today: todayCard(data, now), gym: gymCard(data, now),
       health: health.length ? ledger('health', health, dates, L) : '', journal: journalCard(data, now),
       tasks: ledger('tasks', tasks, dates, L), supps: supps.length ? ledger('supps', supps, dates, L) : '',
     };
@@ -311,8 +311,9 @@
 
   // ---- Moving the cards: hold a card's title for half a second, then drag it up or down. The order is kept on
   // this device (prefs.pageCards); a card added later goes to the end. On the page since 2026-11-02 (his ask, in this
-  // order, "and that's it"): to-do, screen time, today, health, journal; the tasks and supplements cards no more.
-  const CARDS = ['todo', 'screen', 'today', 'health', 'journal'];
+  // order, "and that's it"): to-do, screen time, today, gym (his note the same day), health, journal; the tasks and
+  // supplements cards no more.
+  const CARDS = ['todo', 'screen', 'today', 'gym', 'health', 'journal'];
   function cardOrder() {
     const o = (prefs.pageCards || []).filter(k => CARDS.includes(k));
     return [...o, ...CARDS.filter(k => !o.includes(k))];
@@ -569,6 +570,19 @@
     ].join('');
     return `<section class="card" data-card="screen"><span class="title grip">screen time</span>` +
       (nums ? `<div class="anums">${nums}</div>` : '<p class="muted small">nothing yet today</p>') + '</section>';
+  }
+
+  // Gym (his note, 2026-11-02: "a separate node, functional, adding the session here directly"): today's exercises
+  // and their sets (tap one: change it), + exercise (the picker, for today), progress; the week's count by the title
+  function gymCard(data, date) {
+    const t = (Store.config().tasks || []).find(x => x.kind === 'gym'), g = (Core.dayOf(data, date) || {}).gym, ex = (g && g.ex) || [];
+    let last = '';
+    if (!ex.length) for (let d = Core.addDays(date, -1), i = 0; i < 60 && !last; i++, d = Core.addDays(d, -1)) if ((Core.dayOf(data, d) || {}).gym) last = d;
+    return `<section class="card gymc" data-card="gym" style="--c:${t ? colorOf(t) : GREEN}"><div class="th"><span class="title grip">gym</span>` +
+      `<span class="sums">${t ? `<span>${Core.weekCount(t, data, date)}/${t.perWeek} this week</span>` : ''}</span></div>` +
+      ex.map(e => `<button class="gx" data-gex="${esc(e.name)}"><span>${esc(e.name)}</span><small>${esc(fmtSets(e.sets))}</small></button>`).join('') +
+      (!ex.length ? `<p class="muted small">${g ? 'went, no details' : last ? `nothing today · last: ${pretty(last)}` : 'nothing today'}</p>` : '') +
+      '<div class="gxb"><button class="tdnew" data-gadd>+ exercise</button><button class="tdnew" data-act="progress">progress</button></div></section>';
   }
 
   // The journal: a wide + on top opens the field for a new line; the newest line first (he asked 2026-10-19)
@@ -948,6 +962,8 @@
     if (ds.act === 'settings') return openSettings();
     if (ds.act === 'archive') return openSheet(archiveView);
     if (ds.act === 'progress') return openProgress(null);
+    if ('gadd' in ds) { openGym(Core.today()); gym.picking = true; return renderSheet(); }
+    if (ds.gex) { openGym(Core.today()); gym.ex = ds.gex; return renderSheet(); }
   });
 
   // ---- Panels (gym, settings): a sheet over the page
