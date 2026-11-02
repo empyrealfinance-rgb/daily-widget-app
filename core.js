@@ -65,11 +65,14 @@ var Core = (function () {
   }
 
   // The due window holding date, as [first, last] day, or null when the task isn't due that day.
-  // weekly: on its day; with weeks: 2 (and from: its first date) every other week
+  // weekly: on its day; day: ["sat", "sun"] (days in a row): any of them, once (the weekend: Digital Detox and
+  // fasting, 2026-11-02); with weeks: 2 (and from: the last day of its first window) every other week
   function windowOf(task, date) {
     if (task.kind === 'weekly') {
-      var every = task.weeks > 1 && task.from ? 7 * task.weeks : 0;
-      return WEEKDAYS[weekday(date)] === task.day && (!every || diffDays(task.from, date) % every === 0) ? [date, date] : null;
+      var days = typeof task.day === 'string' ? [task.day] : task.day || [], k = days.indexOf(WEEKDAYS[weekday(date)]);
+      if (k < 0) return null;
+      var a = addDays(date, -k), b = addDays(a, days.length - 1), every = task.weeks > 1 && task.from ? 7 * task.weeks : 0;
+      return !every || diffDays(task.from, b) % every === 0 ? [a, b] : null;
     }
     if (task.kind === 'every') {
       var start = addDays(task.from, Math.floor(diffDays(task.from, date) / task.days) * task.days);
@@ -165,7 +168,9 @@ var Core = (function () {
       return cm != null ? cm + '/' + (task.min || 30) + ' min' : hd && hd.heart && hd.heart.max ? 'top ' + hd.heart.max : '';
     }
     if (task.kind === 'weekly' && task.weeks > 1 && task.from) {
-      var every = 7 * task.weeks, k = diffDays(task.from, now), n = k < 0 ? -k : (every - k % every) % every;
+      // the days until its next window starts ('' while in one)
+      for (var n = 0, ww; n <= 7 * task.weeks && !(ww = windowOf(task, addDays(now, n))); n++);
+      n = ww && ww[0] > now ? diffDays(now, ww[0]) : 0;
       return n === 0 ? '' : n === 1 ? 'tomorrow' : 'in ' + n + ' days';
     }
     if (task.kind === 'every' || task.kind === 'monthEnd') {
