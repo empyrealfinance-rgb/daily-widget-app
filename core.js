@@ -502,6 +502,32 @@ var Core = (function () {
     return out.sort(function (a, b) { var x = a.on + (a.t || ''), y = b.on + (b.t || ''); return x < y ? -1 : x > y ? 1 : 0; });
   }
 
+  // The to-dos as the desk widget and the app's to-do card show them (2026-11-02): for each day from first to last
+  // with something, [how many, done, open] (today: with the open ones from earlier days; the monthly ones still to
+  // come counted on their day), and the list of day sel: today's = todosShown up to today, another day's = all of
+  // its own, oldest written first; then the monthly ones to come on sel ({ id: the rule's, text, on, rep: true }).
+  function todoDays(j, now, sel, first, last) {
+    var l = (j && j.items) || [], rep = (j && j.repeat) || [], days = {}, list = [], i, t, k, c, m, on, r;
+    function count(d) { return days[d] || (days[d] = [0, 0, 0]); }
+    for (i = 0; i < l.length; i++) {
+      t = l[i]; k = !t.done && t.on < now ? now : t.on;
+      if (k < first || k > last) continue;
+      c = count(k); c[0]++; c[t.done ? 1 : 2]++;
+    }
+    var shown = sel === now ? todosShown(j, now) : l.slice().sort(function (a, b) { var x = a.t || '', y = b.t || ''; return x < y ? -1 : x > y ? 1 : 0; });
+    for (i = 0; i < shown.length; i++) if (sel === now ? shown[i].on <= now : shown[i].on === sel) list.push(shown[i]);
+    for (i = 0; i < rep.length; i++) {
+      r = rep[i];
+      for (m = first.slice(0, 7); m <= last.slice(0, 7); m = addDays(m + '-28', 7).slice(0, 7)) {
+        on = m + '-' + pad(Math.min(r.day, daysInMonth(m + '-01')));
+        if (on < first || on > last || on < now || (r.last && r.last >= m) || (r.stop && r.stop <= on)) continue;
+        c = count(on); c[0]++; c[2]++;
+        if (on === sel) list.push({ id: r.id, text: r.text, on: on, rep: true });
+      }
+    }
+    return { days: days, list: list };
+  }
+
   function stamp(d) { d = d || new Date(); return ymd(d) + ' ' + hhmm(d); }
 
   // ---- Apple Health, from the phone's Shortcut: inbox/YYYY-MM-DD-HHMM.txt with entries like
@@ -670,7 +696,7 @@ var Core = (function () {
     dayOf: dayOf, entryOf: entryOf, isDone: isDone, windowOf: windowOf, cell: cell, weekCount: weekCount,
     hint: hint, rows: rows, suppOf: suppOf, suppRows: suppRows, isSet: isSet, apply: apply, dayText: dayText,
     dayNotes: dayNotes, lastDose: lastDose, isConfigOp: isConfigOp, newItem: newItem, moveOp: moveOp, applyConfig: applyConfig,
-    isTodoOp: isTodoOp, applyTodo: applyTodo, newTodo: newTodo, todosShown: todosShown, repeatsDue: repeatsDue,
+    isTodoOp: isTodoOp, applyTodo: applyTodo, newTodo: newTodo, todosShown: todosShown, todoDays: todoDays, repeatsDue: repeatsDue,
     repeatOf: repeatOf, stepsOf: stepsOf, HOME_STEPS: HOME_STEPS, realMinutes: realMinutes, stamp: stamp,
     serializeTodo: serializeTodo, healthOps: healthOps, joinSpans: joinSpans, cardioMin: cardioMin, cardioTask: cardioTask,
     serialize: serialize, serializeConfig: serializeConfig, toB64: toB64, fromB64: fromB64, newId: newId
