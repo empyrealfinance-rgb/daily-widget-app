@@ -359,8 +359,8 @@
   addEventListener('touchmove', ev => { if (drag && drag.on) ev.preventDefault(); }, { passive: false });
 
   // ---- To-dos (2026-11-02: the desk widget's look, his ask): from the top, the month (when ▦ opens it, or while
-  // typing a to-do), the day's open to-dos as bars, the dashed bar, then today and the next two days as meters at
-  // the bottom (how many to-dos, filling as they're done; ▦ beside them). A bar: the day's color at its edge (today
+  // typing a to-do), today and the next two days as meters (how many to-dos, filling as they're done; ▦ beside
+  // them), then the day's open to-dos as bars and the dashed bar. A bar: the day's color at its edge (today
   // amber, other days blue); its box ticks it: it fills with its color, stays a moment, fades out, gone (ticked again
   // meanwhile: undone); its words change it in place, its day picked in the month. The dashed bar: a new one for
   // the day shown (another: tap it in the month). Hold / right-click a to-do: its card (done, delete). A monthly one
@@ -391,12 +391,15 @@
         `<span>${dayLabel(d)}</span><b>${c[0]}</b></button>`;
     };
     const list = v.list.filter(t => !t.done || td.fading.has(t.id));
+    // (the page grows downward, so the mirror of the widget's order: the month and the days on top stay put, a longer
+    // or shorter list only moves what's under it)
     return `<section class="card tdc" data-card="todo"><div class="tdtitle"><span class="title grip">to-do</span></div>` +
       (td.open || tp ? monthBlock(now, picked) : '') +
+      `<div class="td3">${[now, Core.addDays(now, 1), soon].map(meter).join('')}` +
+      `<button class="tdgb${td.open || tp ? ' on' : ''}" data-tgrid aria-label="Month">▦</button></div>` +
       `<div class="tdlist">${list.map(bar).join('')}` +
       (tp && !tp.id ? typingBar() : `<button class="tdnew" data-tnew>+ new${sel !== now ? ' for ' + WD[Core.weekday(sel)] + ' ' + +sel.slice(8) : ''}</button>`) +
-      `</div><div class="td3">${[now, Core.addDays(now, 1), soon].map(meter).join('')}` +
-      `<button class="tdgb${td.open || tp ? ' on' : ''}" data-tgrid aria-label="Month">▦</button></div></section>`;
+      '</div></section>';
   }
   // the month: six weeks whatever the month (the same height, so ‹ › stay put); today outlined, the day picked
   // filled, a stripe under a day with something to do
