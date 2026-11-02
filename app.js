@@ -63,9 +63,9 @@
     const supps = Core.suppRows(cfg, data, dates, now);
     const health = healthRows(data, dates, now);
     const cards = {
-      todo: todoCard(now), tasks: ledger('tasks', tasks, dates, L),
-      supps: supps.length ? ledger('supps', supps, dates, L) : '', health: health.length ? ledger('health', health, dates, L) : '',
-      today: todayCard(data, now),
+      todo: todoCard(now), screen: screenCard(data, now), today: todayCard(data, now),
+      health: health.length ? ledger('health', health, dates, L) : '', journal: journalCard(data, now),
+      tasks: ledger('tasks', tasks, dates, L), supps: supps.length ? ledger('supps', supps, dates, L) : '',
     };
     const nArch = archivedItems(cfg, now).length;
     const gymTask = (cfg.tasks || []).find(t => t.kind === 'gym');
@@ -310,10 +310,11 @@
   }
 
   // ---- Moving the cards: hold a card's title for half a second, then drag it up or down. The order is kept on
-  // this device (prefs.cards); a card added later goes to the end.
-  const CARDS = ['todo', 'tasks', 'supps', 'health', 'today'];
+  // this device (prefs.pageCards); a card added later goes to the end. On the page since 2026-11-02 (his ask, in this
+  // order, "and that's it"): to-do, screen time, today, health, journal; the tasks and supplements cards no more.
+  const CARDS = ['todo', 'screen', 'today', 'health', 'journal'];
   function cardOrder() {
-    const o = (prefs.cards || []).filter(k => CARDS.includes(k));
+    const o = (prefs.pageCards || []).filter(k => CARDS.includes(k));
     return [...o, ...CARDS.filter(k => !o.includes(k))];
   }
   let drag = null;
@@ -336,7 +337,7 @@
     if (!d.on) return;
     d.card.classList.remove('lifted');
     d.card.style.transform = '';
-    if (keep) { prefs.cards = [...main.querySelectorAll('.card[data-card]')].map(c => c.dataset.card); savePrefs(); }
+    if (keep) { prefs.pageCards = [...main.querySelectorAll('.card[data-card]')].map(c => c.dataset.card); savePrefs(); }
     render();
   }
   addEventListener('pointermove', ev => {
@@ -552,17 +553,30 @@
       sleep && sleep.min ? `<span>slept ${hm(sleep.min)}</span>` : '',
       day.steps ? `<span>${Core.stepsOf(day).toLocaleString('en-US')} steps</span>` : '',
       heart ? (Core.cardioMin(ct, heart) != null ? `<span>cardio ${Core.cardioMin(ct, heart)} min</span>` : pulse(heart)) : '',
-      ...(pc.work || []).map(w => `<span><i class="cdot" style="background:${esc(w.color)}"></i>${esc(w.client)} ${hm(w.min)}</span>`),
-      pc.screen ? `<span class="muted">screen ${hm(pc.screen.min)}</span>` : '',
     ].join('');
     return `<section class="card today" data-card="today"><div class="th"><span class="title grip">today</span><span class="sums">${sums}</span></div>` +
       `<div class="dline" data-ldate="${date}">${line}</div>` +
       `<div class="marks">${mark(woke, sl.woke != null)}${mark(Math.min(slept, 1439), sl.slept != null)}</div>` +
-      `<div class="hours">${hours()}</div>` +
-      // the journal: a wide + on top opens the field for a new line; the newest line first (he asked 2026-10-19)
-      `<div class="jl">journal</div><button class="jadd" data-jadd aria-label="Add to the journal">+</button>` +
+      `<div class="hours">${hours()}</div></section>`;
+  }
+
+  // Screen time today, as the analysis shows it: the time at the computer, then each client's work
+  function screenCard(data, date) {
+    const pc = (Core.dayOf(data, date) || {}).pc || {};
+    const nums = [
+      pc.screen ? `<div><b>${hm(pc.screen.min)}</b><span>screen</span></div>` : '',
+      ...(pc.work || []).map(w => `<div><b><i class="cdot" style="background:${esc(w.color)}"></i>${hm(w.min)}</b><span>${esc(w.client)}</span></div>`),
+    ].join('');
+    return `<section class="card" data-card="screen"><span class="title grip">screen time</span>` +
+      (nums ? `<div class="anums">${nums}</div>` : '<p class="muted small">nothing yet today</p>') + '</section>';
+  }
+
+  // The journal: a wide + on top opens the field for a new line; the newest line first (he asked 2026-10-19)
+  function journalCard(data, date) {
+    return `<section class="card" data-card="journal"><span class="title grip">journal</span>` +
+      `<button class="jadd" data-jadd aria-label="Add to the journal">+</button>` +
       `<textarea class="dtext" id="dtext" rows="1" data-date="${date}" hidden></textarea>` +
-      notes.slice().reverse().map(n => `<button class="jn" data-note="${n.id}" data-ndate="${date}"><span class="jt">${n.t || ''}</span>` +
+      Core.dayNotes(data, date).slice().reverse().map(n => `<button class="jn" data-note="${n.id}" data-ndate="${date}"><span class="jt">${n.t || ''}</span>` +
         `<span class="jx">${esc(n.text)}</span></button>`).join('') + '</section>';
   }
 
