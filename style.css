@@ -384,6 +384,7 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 #sheet.top { align-items: flex-start; }
 #sheet.top .panel { border-radius: 0 0 16px 16px; padding-top: calc(env(safe-area-inset-top) + 12px); padding-bottom: 16px; }
 .pks { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.pk.hide { color: rgba(227, 227, 229, .75); border-style: dashed; }
 .pk { background: var(--surface2); border: 1px solid var(--line); border-radius: 0; padding: 9px 13px; font-size: 15px; color: var(--text); }
 .pk.done { border-color: #3d7a63; }
 .pk.new { color: var(--accent); background: none; }

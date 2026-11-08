@@ -380,7 +380,7 @@ var Core = (function () {
   //   { type: 'add', list, item }                                          a new task or supplement
   //   { type: 'order', list, ids }                                         the list in this order
 
-  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename' || op.type === 'add' || op.type === 'order' || op.type === 'progress'; }
+  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename' || op.type === 'add' || op.type === 'order' || op.type === 'progress' || op.type === 'gymHide'; }
 
   // Moving an item up (dir -1) or down (1) past the next one on screen (archived ones stay where they are)
   function moveOp(c, list, id, dir, date) {
@@ -416,6 +416,14 @@ var Core = (function () {
     var i;
     // the gym progress page: his order of the exercises, how many on its first page
     if (op.type === 'progress') { c.progress = { order: op.order, first: op.first }; return c; }
+    // gym exercises off the picker (his ask, 2026-11-08: "so they don't clutter"); their history stays
+    if (op.type === 'gymHide') {
+      var hid = c.gymHidden || [], k = hid.indexOf(op.name);
+      if (op.on && k < 0) hid.push(op.name);
+      if (!op.on && k >= 0) hid.splice(k, 1);
+      if (hid.length) c.gymHidden = hid; else delete c.gymHidden;
+      return c;
+    }
     if (op.type === 'order') {
       var l = c[op.list] || [], byId = {}, out = [];
       for (i = 0; i < l.length; i++) byId[l[i].id] = l[i];

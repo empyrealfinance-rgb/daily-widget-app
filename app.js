@@ -67,7 +67,7 @@
       health: health.length ? ledger('health', health, dates, L) : '', journal: journalCard(data, now),
       tasks: ledger('tasks', tasks, dates, L), supps: supps.length ? ledger('supps', supps, dates, L) : '',
     };
-    const nArch = archivedItems(cfg, now).length;
+    const nArch = archivedItems(cfg, now).length + (cfg.gymHidden || []).length;
     const gymTask = (cfg.tasks || []).find(t => t.kind === 'gym');
     main.innerHTML = cardOrder().map(k => cards[k]).join('') + '<div class="pagebtns">' +
       `<button class="gymbtn" data-act="progress" style="--c:${gymTask ? colorOf(gymTask) : GREEN}">gym progress</button>` +
@@ -1007,7 +1007,7 @@
 
   const gym = { date: null, ex: null, picking: false, search: '', next: null, armed: -1 };
   function openGym(date) {
-    Object.assign(gym, { date, ex: null, picking: false, search: '', next: null, armed: -1 });
+    Object.assign(gym, { date, ex: null, picking: false, search: '', next: null, armed: -1, editing: false });
     openSheet(gymView);
   }
 
@@ -1181,11 +1181,14 @@
   function pickList() {
     const hist = gymHistory(), q = gym.search.trim().toLowerCase(), cat = Store.gym().exercises || [];
     const last = n => (hist[n] ? hist[n][hist[n].length - 1].date : '');
+    const hidden = Store.config().gymHidden || [];
     const names = [...new Set([...cat.map(e => e.name), ...(q ? Object.keys(hist) : [])])]
-      .filter(n => !q || exFits(n, q))
+      .filter(n => (!q || exFits(n, q)) && !hidden.includes(n))
       .sort((a, b) => (last(a) < last(b) ? 1 : last(a) > last(b) ? -1 : 0));
     const today = n => (hist[n] || []).some(x => x.date === gym.date);
-    const btn = n => `<button class="pk${today(n) ? ' done' : ''}" data-pick="${esc(n)}">${esc(n)}</button>`;
+    // editing (the "edit" chip): × on each, a tap takes it off the lists (the archive brings it back)
+    const btn = n => gym.editing ? `<button class="pk hide" data-ghide="${esc(n)}">${esc(n)} ×</button>` :
+      `<button class="pk${today(n) ? ' done' : ''}" data-pick="${esc(n)}">${esc(n)}</button>`;
     const tabs = Store.gym().categories || [];
     const catOf = n => { const c = (exInfo(n) || {}).category; return tabs.includes(c) ? c : ''; };
     const section = (c, head) => {
@@ -1194,7 +1197,8 @@
     };
     if (!q) {
       const tab = tabs.includes(prefs.gymTab) ? prefs.gymTab : (tabs[0] || '');
-      return (tabs.length ? `<div class="chips pkt">${tabs.map(c => `<button class="chip${c === tab ? ' on' : ''}" data-gtab="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : '') +
+      return (tabs.length ? `<div class="chips pkt">${tabs.map(c => `<button class="chip${c === tab ? ' on' : ''}" data-gtab="${esc(c)}">${esc(c)}</button>`).join('')}` +
+        `<button class="chip${gym.editing ? ' on' : ''}" data-gedit>${gym.editing ? 'done' : 'edit'}</button></div>` : '') +
         section(tab, '');
     }
     const add = !names.includes(q) ? `<button class="pk new" data-pick="${esc(q)}">+ ${esc(q)}</button>` : '';
@@ -1279,6 +1283,8 @@
     const ds = el.dataset;
     if (ds.ex) { gym.ex = ds.ex; gym.next = null; gym.armed = -1; return renderSheet(); }
     if (ds.gtab) { prefs.gymTab = ds.gtab; savePrefs(); $('#picklist').innerHTML = pickList(); return; }
+    if ('gedit' in ds) { gym.editing = !gym.editing; $('#picklist').innerHTML = pickList(); return; }
+    if (ds.ghide) { Store.change({ type: 'gymHide', name: ds.ghide, on: true }); $('#picklist').innerHTML = pickList(); return; }
     if (ds.pick) { gym.ex = ds.pick.trim().toLowerCase(); gym.picking = false; gym.search = ''; gym.next = null; gym.armed = -1; return renderSheet(); }
     if (ds.step) { const [f, dir] = ds.step.split(','); return step(f, +dir); }
     if ('bw' in ds) { $('#kg').value = 'BW'; gym.next = [null, parseInt($('#reps').value, 10)]; return; }
@@ -1456,12 +1462,16 @@
       return rows.length ? `<h4>${list}</h4>` + rows.map(([k, t]) => `<div class="arow"><span><i class="cdot" style="background:${colorOf(t)}"></i>` +
         `${esc(t.name)}${since(t)}</span><button class="btn small" data-r="${k}" data-id="${t.id}">Bring back</button></div>`).join('') : '';
     };
-    return sheetHead('archive') + (l.length ? part('tasks') + part('supplements') : '<p class="muted">Nothing archived.</p>');
+    const gx = Store.config().gymHidden || [];
+    const gyms = gx.length ? '<h4>gym exercises</h4>' + gx.map(n => `<div class="arow"><span>${esc(n)}</span>` +
+      `<button class="btn small" data-gshow="${esc(n)}">Bring back</button></div>`).join('') : '';
+    return sheetHead('archive') + (l.length || gx.length ? part('tasks') + part('supplements') + gyms : '<p class="muted">Nothing archived.</p>');
   }
   function archiveClick(el) {
-    if (!el.dataset.r) return;
-    Store.change({ type: 'status', list: el.dataset.r, id: el.dataset.id, date: Core.today(), status: 'active' });
-    if (archivedItems(Store.config(), Core.today()).length) renderSheet(); else closeSheet();
+    if (el.dataset.gshow) Store.change({ type: 'gymHide', name: el.dataset.gshow, on: false });
+    else if (el.dataset.r) Store.change({ type: 'status', list: el.dataset.r, id: el.dataset.id, date: Core.today(), status: 'active' });
+    else return;
+    if (archivedItems(Store.config(), Core.today()).length || (Store.config().gymHidden || []).length) renderSheet(); else closeSheet();
   }
 
   // ---- Settings: token, this device, colors
