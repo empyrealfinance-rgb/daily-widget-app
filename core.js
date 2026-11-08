@@ -380,7 +380,7 @@ var Core = (function () {
   //   { type: 'add', list, item }                                          a new task or supplement
   //   { type: 'order', list, ids }                                         the list in this order
 
-  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename' || op.type === 'add' || op.type === 'order' || op.type === 'progress' || op.type === 'gymHide'; }
+  function isConfigOp(op) { return op.type === 'status' || op.type === 'rename' || op.type === 'add' || op.type === 'order' || op.type === 'progress' || op.type === 'gymHide' || op.type === 'cardHide'; }
 
   // Moving an item up (dir -1) or down (1) past the next one on screen (archived ones stay where they are)
   function moveOp(c, list, id, dir, date) {
@@ -422,6 +422,14 @@ var Core = (function () {
       if (op.on && k < 0) hid.push(op.name);
       if (!op.on && k >= 0) hid.splice(k, 1);
       if (hid.length) c.gymHidden = hid; else delete c.gymHidden;
+      return c;
+    }
+    // page cards off the page (his ask, 2026-11-08: "the rest can be archived"); the archive brings them back
+    if (op.type === 'cardHide') {
+      var ch = c.cardsHidden || [], j = ch.indexOf(op.card);
+      if (op.on && j < 0) ch.push(op.card);
+      if (!op.on && j >= 0) ch.splice(j, 1);
+      if (ch.length) c.cardsHidden = ch; else delete c.cardsHidden;
       return c;
     }
     if (op.type === 'order') {

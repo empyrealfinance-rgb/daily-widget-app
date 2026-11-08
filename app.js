@@ -67,9 +67,9 @@
       health: health.length ? ledger('health', health, dates, L) : '', journal: journalCard(data, now),
       tasks: ledger('tasks', tasks, dates, L), supps: supps.length ? ledger('supps', supps, dates, L) : '',
     };
-    const nArch = archivedItems(cfg, now).length + (cfg.gymHidden || []).length;
+    const nArch = nArchived(cfg);
     const gymTask = (cfg.tasks || []).find(t => t.kind === 'gym');
-    main.innerHTML = cardOrder().map(k => cards[k]).join('') + '<div class="pagebtns">' +
+    main.innerHTML = cardOrder().filter(k => !(cfg.cardsHidden || []).includes(k)).map(k => cards[k]).join('') + '<div class="pagebtns">' +
       `<button class="gymbtn" data-act="progress" style="--c:${gymTask ? colorOf(gymTask) : GREEN}">gym progress</button>` +
       (nArch ? `<button class="arcbtn" data-act="archive">archive · ${nArch}</button>` : '') + '</div>';
     restoreScroll(scroll);
@@ -310,12 +310,13 @@
   }
 
   // ---- Moving the cards: hold a card's title for half a second, then drag it up or down. The order is kept on
-  // this device (prefs.pageCards); a card added later goes to the end. On the page since 2026-11-02 (his ask, in this
-  // order, "and that's it"): to-do, screen time, today, gym (his note the same day), health, journal; the tasks and
-  // supplements cards no more.
-  const CARDS = ['todo', 'screen', 'today', 'gym', 'health', 'journal'];
+  // this device (prefs.pageOrder); a card added later goes to the end. Since 2026-11-08 (his ask, "that's it for now,
+  // the rest can be archived"): to-do, gym, screen time, journal; today and health in the archive (config cardsHidden).
+  // A new key, so the order dragged before (prefs.pageCards) doesn't keep the old one.
+  const CARDS = ['todo', 'gym', 'screen', 'journal', 'today', 'health'];
+  const CARD_NAMES = { todo: 'to-do', gym: 'gym', screen: 'screen time', journal: 'journal', today: 'today', health: 'health' };
   function cardOrder() {
-    const o = (prefs.pageCards || []).filter(k => CARDS.includes(k));
+    const o = (prefs.pageOrder || []).filter(k => CARDS.includes(k));
     return [...o, ...CARDS.filter(k => !o.includes(k))];
   }
   let drag = null;
@@ -338,7 +339,11 @@
     if (!d.on) return;
     d.card.classList.remove('lifted');
     d.card.style.transform = '';
-    if (keep) { prefs.pageCards = [...main.querySelectorAll('.card[data-card]')].map(c => c.dataset.card); savePrefs(); }
+    if (keep) {
+      const shown = [...main.querySelectorAll('.card[data-card]')].map(c => c.dataset.card);
+      prefs.pageOrder = [...shown, ...cardOrder().filter(k => !shown.includes(k))];
+      savePrefs();
+    }
     render();
   }
   addEventListener('pointermove', ev => {
@@ -582,7 +587,8 @@
       `<span class="sums">${t ? `<span>${Core.weekCount(t, data, date)}/${t.perWeek} this week</span>` : ''}</span></div>` +
       ex.map(e => `<button class="gx" data-gex="${esc(e.name)}"><span>${esc(e.name)}</span><small>${esc(fmtSets(e.sets))}</small></button>`).join('') +
       (!ex.length ? `<p class="muted small">${g ? 'went, no details' : last ? `nothing today · last: ${pretty(last)}` : 'nothing today'}</p>` : '') +
-      '<div class="gxb"><button class="tdnew" data-gadd>+ exercise</button><button class="tdnew" data-act="progress">progress</button></div></section>';
+      '<div class="gxb"><button class="tdnew" data-gadd>+ exercise</button><button class="tdnew" data-act="progress">progress</button>' +
+      '<button class="tdnew rtb" data-act="routines">routines</button></div></section>';
   }
 
   // The journal: a wide + on top opens the field for a new line; the newest line first (he asked 2026-10-19)
@@ -962,6 +968,7 @@
     if (ds.act === 'settings') return openSettings();
     if (ds.act === 'archive') return openSheet(archiveView);
     if (ds.act === 'progress') return openProgress(null);
+    if (ds.act === 'routines') return openRoutines();
     if ('gadd' in ds) { openGym(Core.today()); gym.picking = true; return renderSheet(); }
     if (ds.gex) { openGym(Core.today()); gym.ex = ds.gex; return renderSheet(); }
   });
@@ -1234,6 +1241,7 @@
       `<button class="chip" data-g="progress">progress</button><button class="x" data-close aria-label="Close">×</button></div>` +
       (how ? `<p class="small how">${esc(how)}</p>` : '') +
       `<p class="muted small">${prev ? `last time, ${rel(prev.date)}: ${esc(fmtSets(prev.sets))}${prev.note ? ' · ' + esc(prev.note) : ''}` : 'first time'}</p>` +
+      `<div id="exchart">${exChart()}</div>` +
       `<ol class="sets">${sets.map((s, i) => `<li><span><span class="n">${i + 1}</span>${kgText(s[0])} × ${s[1] ?? '?'}</span>` +
         `<button class="del${gym.armed === i ? ' armed' : ''}" data-del="${i}">${gym.armed === i ? 'delete?' : '✕'}</button></li>`).join('')}</ol>` +
       `<div class="steppers">
@@ -1246,6 +1254,43 @@
       (sets.length ? `<label>note<input id="exnote" value="${esc(e.note)}"></label>` : '');
   }
 
+  // While putting the sets in (his pick G1, 2026-11-08: "see visually where the thing lands as I'm doing it"): the
+  // heaviest set of each session in the last 3 months as a line (most reps, for the ones done without weight), the
+  // best ever dashed, today's sets as amber dots on the right (bigger = more reps), and the set on the steppers as a
+  // dotted ring that moves with them; "new best" when it would beat the best
+  function exChart() {
+    const all = progressData(), E = all[gym.ex], reps = E ? E.reps : !!(exInfo(gym.ex) || {}).body;
+    const past = E ? E.s.filter(x => x[0] < gym.date) : [], S = past.filter(x => x[0] > Core.addDays(gym.date, -91));
+    const e = exOf(gym.date, gym.ex), sets = (e && e.sets) || [], val = t => (t ? (reps ? t[1] : t[0]) || 0 : 0);
+    const todays = sets.filter(t => val(t) > 0), next = gym.next || prefill(gym.ex, sets, previous(gym.ex, gym.date));
+    const ghost = val(next) > 0 ? next : null;
+    if (!S.length && !todays.length && !ghost) return '';
+    const best = past.length ? Math.max(...past.map(x => x[1])) : null;
+    const W = 340, H = 140, L = 30, R = 10, T = 14, B = 18, c = pcolor(progOrder(all).order, gym.ex), AMB = '#EFC26B';
+    const vs = [...S.map(x => x[1]), ...todays.map(val), ...(ghost ? [val(ghost)] : []), ...(best != null ? [best] : [])];
+    let lo = Math.min(...vs), hi = Math.max(...vs);
+    const r0 = hi - lo, stp = r0 <= 12 ? 2 : r0 <= 30 ? 5 : r0 <= 80 ? 10 : r0 <= 200 ? 20 : 50;
+    lo = Math.floor(lo / stp) * stp; hi = Math.max(lo + stp, Math.ceil(hi / stp) * stp);
+    const n = S.length + 1, X = i => (n === 1 ? W - R - 12 : L + 8 + i * (W - L - R - 20) / (n - 1)), Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+    const rad = t => 2.4 + Math.min(t[1] || 0, 20) / 5;
+    let g = '';
+    for (let v = lo; v <= hi; v += stp) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" class="pg"/><text x="${L - 6}" y="${Y(v) + 4}" class="pt" text-anchor="end">${v}</text>`;
+    if (best != null) g += `<line x1="${L}" x2="${W - R}" y1="${Y(best)}" y2="${Y(best)}" stroke="${c}" stroke-dasharray="4 4" stroke-width="1" opacity=".6"/>` +
+      `<text x="${L + 4}" y="${Y(best) - 4}" class="pt" style="fill:${c}">best ${reps ? best : n1(best)}</text>`;
+    if (S.length > 1) g += `<polyline fill="none" stroke="${c}" stroke-width="1.8" stroke-linejoin="round" points="${S.map((x, i) => X(i).toFixed(1) + ',' + Y(x[1]).toFixed(1)).join(' ')}"/>`;
+    S.forEach((x, i) => { g += `<circle cx="${X(i)}" cy="${Y(x[1])}" r="2.4" fill="${c}"/>`; });
+    const x1 = X(n - 1);
+    for (const t of todays) g += `<circle cx="${x1}" cy="${Y(val(t))}" r="${rad(t)}" fill="${AMB}" opacity=".85"/>`;
+    if (ghost) {
+      g += `<circle cx="${x1}" cy="${Y(val(ghost))}" r="${rad(ghost)}" fill="none" stroke="${AMB}" stroke-width="1.5" stroke-dasharray="2 2"/>`;
+      if (best != null && val(ghost) > best) g += `<text x="${x1 - rad(ghost) - 5}" y="${Y(val(ghost)) + 4}" class="pt" text-anchor="end" style="fill:${AMB}">new best</text>`;
+    }
+    if (S.length) g += `<text x="${X(0)}" y="${H - 4}" class="pt">${dm(S[0][0])}</text>`;
+    g += `<text x="${W - R}" y="${H - 4}" class="pt" text-anchor="end" style="fill:${AMB}">${gym.date === Core.today() ? 'today' : dm(gym.date)}</text>`;
+    return `<svg class="pchart exc" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(gym.ex)}: the last 3 months and today">${g}</svg>`;
+  }
+  function liveChart() { const el = $('#exchart'); if (el) el.innerHTML = exChart(); }
+
   function step(field, dir) {
     const el = $('#' + field);
     if (field === 'kg') {
@@ -1255,6 +1300,7 @@
     }
     else el.value = Math.max(0, (parseInt(el.value, 10) || 0) + dir);
     gym.next = [parseKg($('#kg').value), parseInt($('#reps').value, 10)];
+    liveChart();
   }
 
   function addSet() {
@@ -1287,7 +1333,7 @@
     if (ds.ghide) { Store.change({ type: 'gymHide', name: ds.ghide, on: true }); $('#picklist').innerHTML = pickList(); return; }
     if (ds.pick) { gym.ex = ds.pick.trim().toLowerCase(); gym.picking = false; gym.search = ''; gym.next = null; gym.armed = -1; return renderSheet(); }
     if (ds.step) { const [f, dir] = ds.step.split(','); return step(f, +dir); }
-    if ('bw' in ds) { $('#kg').value = 'BW'; gym.next = [null, parseInt($('#reps').value, 10)]; return; }
+    if ('bw' in ds) { $('#kg').value = 'BW'; gym.next = [null, parseInt($('#reps').value, 10)]; return liveChart(); }
     if (ds.del) return deleteSet(+ds.del);
     switch (ds.g) {
       case 'pick': gym.picking = true; gym.search = ''; return renderSheet();
@@ -1297,6 +1343,36 @@
       case 'went': Store.change({ type: 'gymDay', date: gym.date, on: true }); return renderSheet();
       case 'notgym': Store.change({ type: 'gymDay', date: gym.date, on: false }); return renderSheet();
     }
+  }
+
+  // ---- Routines (his pick S2, 2026-11-08, under a button on the gym card): a cheat sheet to look up in the morning
+  // or the evening, nothing to tick ("rather just have them as a list I can look up"): gym.json "routines", a colored
+  // tab each; a tap on an exercise shows its how-to. Opens on morning before noon, evening from 6 pm, else the last tab.
+  const rt = { tab: null, open: '' };
+  function openRoutines() {
+    const h = new Date().getHours();
+    rt.tab = h < 12 ? 'morning' : h >= 18 ? 'evening' : prefs.routine || null;
+    rt.open = '';
+    openSheet(routinesView);
+  }
+  function routinesView() {
+    const list = Store.gym().routines || [], cur = list.find(r => r.name === rt.tab) || list[0];
+    if (!cur) return sheetHead('routines') + '<p class="muted">None yet.</p>';
+    return sheetHead('routines') +
+      `<div class="chips rtt">${list.map(r => `<button class="chip${r === cur ? ' on' : ''}" data-rt="${esc(r.name)}" style="--c:${r.color}">${esc(r.name)}</button>`).join('')}</div>` +
+      (cur.when ? `<p class="muted small">${esc(cur.when)}</p>` : '') +
+      cur.ex.map(([name, dose]) => {
+        const how = (exInfo(name) || {}).how;
+        return `<button class="rtr" data-rx="${esc(name)}" style="--c:${cur.color}"><span>${esc(name)}</span><small>${esc(dose)}</small>` +
+          (rt.open === name && how ? `<em>${esc(how)}</em>` : '') + '</button>';
+      }).join('');
+  }
+  function routinesClick(el) {
+    const ds = el.dataset;
+    if (ds.rt) { rt.tab = ds.rt; rt.open = ''; prefs.routine = ds.rt; savePrefs(); }
+    else if (ds.rx) rt.open = rt.open === ds.rx ? '' : ds.rx;
+    else return;
+    renderSheet();
   }
 
   // ---- Analysis: everything for a week, a month or a year, archived things and done to-dos included
@@ -1454,6 +1530,7 @@
 
   const archivedItems = (cfg, now) => [...(cfg.tasks || []).map(t => ['tasks', t]), ...(cfg.supplements || []).map(t => ['supplements', t])]
     .filter(([, t]) => { const x = Core.statusOn(t, now); return x && x !== 'active'; });
+  const nArchived = cfg => archivedItems(cfg, Core.today()).length + (cfg.gymHidden || []).length + (cfg.cardsHidden || []).length;
   function archiveView() {
     const now = Core.today(), l = archivedItems(Store.config(), now);
     const since = t => { const h = t.status || [], last = h[h.length - 1]; return last ? ` <span class="muted small">since ${dm(last[0])}</span>` : ''; };
@@ -1465,13 +1542,17 @@
     const gx = Store.config().gymHidden || [];
     const gyms = gx.length ? '<h4>gym exercises</h4>' + gx.map(n => `<div class="arow"><span>${esc(n)}</span>` +
       `<button class="btn small" data-gshow="${esc(n)}">Bring back</button></div>`).join('') : '';
-    return sheetHead('archive') + (l.length || gx.length ? part('tasks') + part('supplements') + gyms : '<p class="muted">Nothing archived.</p>');
+    const ch = Store.config().cardsHidden || [];
+    const cards = ch.length ? '<h4>page cards</h4>' + ch.map(k => `<div class="arow"><span>${esc(CARD_NAMES[k] || k)}</span>` +
+      `<button class="btn small" data-cshow="${esc(k)}">Bring back</button></div>`).join('') : '';
+    return sheetHead('archive') + (nArchived(Store.config()) ? part('tasks') + part('supplements') + gyms + cards : '<p class="muted">Nothing archived.</p>');
   }
   function archiveClick(el) {
     if (el.dataset.gshow) Store.change({ type: 'gymHide', name: el.dataset.gshow, on: false });
+    else if (el.dataset.cshow) Store.change({ type: 'cardHide', card: el.dataset.cshow, on: false });
     else if (el.dataset.r) Store.change({ type: 'status', list: el.dataset.r, id: el.dataset.id, date: Core.today(), status: 'active' });
     else return;
-    if (archivedItems(Store.config(), Core.today()).length || (Store.config().gymHidden || []).length) renderSheet(); else closeSheet();
+    if (nArchived(Store.config())) renderSheet(); else closeSheet();
   }
 
   // ---- Settings: token, this device, colors
@@ -1512,12 +1593,13 @@
     if (!el) return;
     if ('close' in el.dataset) return closeSheet();
     if (sheetRender === gymView) gymClick(el); else if (sheetRender === analysisView) anaClick(el);
-    else if (sheetRender === progressView) progClick(el); else if (sheetRender === archiveView) archiveClick(el); else settingsClick(el);
+    else if (sheetRender === progressView) progClick(el); else if (sheetRender === archiveView) archiveClick(el);
+    else if (sheetRender === routinesView) routinesClick(el); else settingsClick(el);
   });
   sheetEl.addEventListener('input', ev => {
     const id = ev.target.id;
     if (id === 'search') { gym.search = ev.target.value; $('#picklist').innerHTML = pickList(); }
-    if (id === 'kg' || id === 'reps') gym.next = [parseKg($('#kg').value), parseInt($('#reps').value, 10)];
+    if (id === 'kg' || id === 'reps') { gym.next = [parseKg($('#kg').value), parseInt($('#reps').value, 10)]; liveChart(); }
   });
   sheetEl.addEventListener('change', ev => {
     const id = ev.target.id;

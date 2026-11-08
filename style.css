@@ -316,7 +316,17 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
   background: rgba(227, 227, 229, .12); box-shadow: inset 3px 0 0 var(--c); text-align: left; color: #E3E3E5; }
 .gx span { flex: none; }
 .gx small { flex: 1; min-width: 0; text-align: right; color: rgba(227, 227, 229, .7); font-size: 12.5px; }
-.gxb { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.gxb { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
+.gxb .rtb.tdnew { color: rgba(239, 194, 107, .85); box-shadow: inset 0 0 0 1px rgba(239, 194, 107, .35); }
+
+/* ---- routines: a colored tab each, the exercises as bars with their dose; a tap: the how-to */
+.rtt .chip { color: var(--c); border-color: var(--c); opacity: .6; }
+.rtt .chip.on { opacity: 1; background: var(--c); color: #111214; }
+.rtr { display: block; width: 100%; margin-top: 6px; padding: 7px 10px; border: 0; text-align: left;
+  background: rgba(227, 227, 229, .07); box-shadow: inset 3px 0 0 var(--c); color: #E3E3E5; }
+.rtr span, .rtr small, .rtr em { display: block; }
+.rtr small { color: var(--muted); font-size: 12.5px; }
+.rtr em { font-style: normal; font-size: 12.5px; color: var(--text); margin-top: 5px; }
 .gxb .tdnew { height: 30px; padding: 0 10px; text-align: left; border: 0; background: none; color: rgba(227, 227, 229, .55);
   box-shadow: inset 0 0 0 1px rgba(227, 227, 229, .22); }
 
@@ -401,10 +411,12 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .sets li .n { color: var(--faint); width: 26px; display: inline-block; }
 .sets .del { background: none; border: 0; color: var(--faint); padding: 4px 8px; font-size: 14px; }
 .sets .del.armed { color: var(--danger); }
-.steppers { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
-.stepper { flex: 1; min-width: 150px; }
+/* the numbers get the room: narrower buttons, joined to the field (2026-11-08: "not clenched between the buttons") */
+.steppers { display: flex; gap: 12px; margin-top: 8px; }
+.stepper { flex: 1; min-width: 0; }
 .stepper .lbl { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .stepper .lbl .bwb { width: auto; height: auto; padding: 1px 9px; font-size: 11px; border-radius: 0; color: var(--muted); background: none; }
-.stepper .ctl { display: flex; gap: 6px; }
-.stepper button { width: 52px; height: 52px; flex: none; border-radius: 0; font-size: 24px; background: var(--surface2); border: 1px solid var(--line); }
-.stepper input { text-align: center; font-size: 22px; padding: 8px 4px; height: 52px; }
+.stepper .ctl { display: flex; gap: 0; }
+.stepper button { width: 42px; height: 52px; flex: none; border-radius: 0; font-size: 24px; background: var(--surface2); border: 1px solid var(--line); }
+.stepper input { flex: 1; min-width: 0; width: auto; text-align: center; font-size: 22px; padding: 8px 0; height: 52px; border-left: 0; border-right: 0; }
+.exc { margin: 8px 0 2px; background: var(--surface2); }
