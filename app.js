@@ -68,9 +68,8 @@
       tasks: ledger('tasks', tasks, dates, L), supps: supps.length ? ledger('supps', supps, dates, L) : '',
     };
     const nArch = nArchived(cfg);
-    const gymTask = (cfg.tasks || []).find(t => t.kind === 'gym');
+    // at the bottom: the archive (the "gym progress" button there went 2026-11-08: the gym card has "progress")
     main.innerHTML = cardOrder().filter(k => !(cfg.cardsHidden || []).includes(k)).map(k => cards[k]).join('') + '<div class="pagebtns">' +
-      `<button class="gymbtn" data-act="progress" style="--c:${gymTask ? colorOf(gymTask) : GREEN}">gym progress</button>` +
       (nArch ? `<button class="arcbtn" data-act="archive">archive · ${nArch}</button>` : '') + '</div>';
     restoreScroll(scroll);
     homeKeeper.disconnect();

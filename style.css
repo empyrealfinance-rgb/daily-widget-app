@@ -343,7 +343,6 @@ main { padding: 4px 12px calc(env(safe-area-inset-bottom) + 24px); max-width: 12
 .pmv:disabled { opacity: .3; }
 .pmv.on { color: #EFC26B; }
 .pagebtns { display: flex; justify-content: center; align-items: center; gap: 10px; margin: 4px 0 24px; }
-.gymbtn { background: color-mix(in srgb, var(--c) 30%, transparent); border: 1px solid var(--c); border-radius: 0; padding: 8px 18px; color: #e6f5ee; font-size: 14px; font-weight: 600; }
 .arcbtn { background: none; border: 1px solid var(--line); border-radius: 0; padding: 6px 16px; color: var(--muted); font-size: 13px; }
 .pchart { display: block; width: 100%; height: auto; margin-top: 12px; }
 .pchart .pg { stroke: var(--line); }
